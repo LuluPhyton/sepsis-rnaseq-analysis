@@ -1,0 +1,1368 @@
+---
+title: "Comparative transcriptomic analysis of SIRS and Septic shock"
+author: "Tommaso Saccon, Luisa Bellandi"
+output:
+  html_document:
+    theme: sandstone
+    toc: true
+    toc_float: true
+    number_sections: true
+    df_print: paged
+    highlight: tango
+---
+
+```{=html}
+<style>
+body {
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+p {
+  text-align: justify;
+}
+
+h1 {
+  color: #1b4d3e;
+  font-weight: 700;
+  font-size: 28px;
+  border-bottom: 2px solid #1b4d3e;
+  padding-bottom: 6px;
+  text-align: left;
+}
+
+h2 {
+  color: #2e6f5e;
+  font-weight: 600;
+  font-size: 22px;
+  text-align: left;
+}
+
+h3 {
+  color: #4f8f7a;
+  font-size: 18px;
+  text-align: left;
+}
+
+.title {
+  color: #1b4d3e;
+  font-weight: 800;
+  font-size: 32px;
+  text-align: left;
+}
+
+.author, .date {
+  color: #555555;
+  text-align: left;
+}
+
+pre {
+  background-color: #f6f8fa;
+  border-radius: 6px;
+}
+
+code {
+  color: #1b4d3e;
+}
+
+.figure {
+  text-align: center;
+}
+
+.figure p.caption {
+  text-align: center;
+  font-size: 14px;
+  color: #555555;
+  margin-top: 8px;
+}
+.table-compact {
+  display: inline-block;
+  padding: 0 !important;
+  margin: 0 auto 1rem auto !important;
+  background: transparent !important;
+  min-height: 0 !important;
+}
+
+.table-compact .table {
+  margin-bottom: 0 !important;
+}
+</style>
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  fig.align = "center",
+  message = FALSE,
+  warning = FALSE
+)
+
+library(knitr)
+library(kableExtra)
+library(EDASeq)
+library(tidyr)
+library(dplyr)
+library(plyr)
+library(edgeR)
+library(DESeq2)
+library(limma)
+library(clusterProfiler)
+library(pathview)
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+library(ReactomePA)
+library(enrichplot)
+library(ggnewscale)
+library(ggupset)
+library(ggridges)
+library(ggplot2)
+library(corrplot)
+library(ggrepel)
+library(pheatmap)
+library(cluster)
+library(tidyr)
+library(RUVSeq)
+library(patchwork)
+```
+
+# Biological problem and objective of our study
+
+**SIRS** (*Systemic Inflammatory Response Syndrome*) is a condition characterized by a systemic inflammatory response of the organism, which may occur as consequences of different clinical situations, including trauma, burns, tissue damage and infections. In 1992 an international consensus conference defined **sepsis** as the systemic inflammatory response to the presence of infection. Therefore, sepsis is considered a form of SIRS triggered by the presence of an infection.
+
+Despite the different triggering factor, SIRS and sepsis share numerous inflammatory characteristics (such as fever, tachycardia, alteration of white blood cell count), making it more difficult to distinguish the two conditions at the first clinical contact with the patient. However, for patient diagnosis and management, being able to recognize the two different conditions is fundamental because the presence of an infection significantly influences disease progression and the therapeutic approach that must be implemented.
+
+Sepsis may present with different degrees of severity, including uncomplicated sepsis, severe sepsis and septic shock, with septic shock representing one of the most severe manifestations of infection-associated systemic inflammation. For this reason, characterizing the molecular mechanisms associated with septic shock may provide useful insights into the biological processes underlying severe infectious inflammation.
+
+The advent of new transcriptomic approaches in recent years, such as RNA-seq, has provided a new tool to study the molecular differences associated with inflammatory and infectious conditions through gene expression analysis. In particular, septic shock is associated with a strong dysregulation of immune and inflammatory pathways induced by the interaction between host and pathogen. For this reason, the identification of differentially expressed genes and biological pathways involved in the immune response may contribute to a better molecular characterization of septic shock compared to non-infectious systemic inflammation.
+
+## Aim of the study
+
+The aim of the present study is to investigate gene expression profiles in subjects affected by **SIRS** and **Septic shock** through RNA-seq data analysis, in order to identify differentially expressed genes and biological pathways involved in immune and inflammatory responses associated with infection. In particular, the study aims to characterize the molecular differences between the two conditions through **differential expression** and **pathway enrichment analyses**.
+
+# Experimental design
+
+Peripheral blood samples were collected from 129 representative subjects with either Systemic Inflammatory Response Syndrome (SIRS) or sepsis. Subjects were initially classified into five clinical groups reflecting different stages of sepsis progression: uncomplicated sepsis, severe sepsis, septic shock, sepsis non-survivors and SIRS controls.
+
+Blood was collected in PAXgene RNA tubes (Qiagen, CA, USA) as patients arrived in the ED. Then, samples were stored at -80°C. Samples were later prepared using PaxGene Blood RNA kit (Qiagen) in order to isolate RNA, this step included cell pelleting, proteinase K digestion, silica-membrane purification, and DNase I treatment to eliminate genomic DNA contamination. RNA integrity was assessed through Agilent's 2100 Bioanalyzer (using RNA 600 Nano kit), yielding an average RNA Integrity Number (RIN) of 7.6 (with standard deviation 1.7).
+
+For sequencing libraries preparation, Illumina mRNA-Seq Sample Prep Kit was used. mRNA was isolated from total RNA using oligo-dT magnetic Dynabeads. Random primers were used for retro-transcription and Illumina adapters were ligated to cDNA fragments. This was followed by a size-selection step: only cDNA fragments from 350 to 500 bp were kept for the sequencing phase. cDNA libraries were enriched through 18 cycles of PCR.
+
+Afterwards, sequencing was carried out using Illumina $GA_{IIx}$ sequencers, producing 54 bp long single end reads, and leading to an average library size of 13.4 million reads per sample and a total of 718.4 Mbp of sequence, achieving 9-fold coverage. Base calling was performed using Illumina Pipeline softwares v1.4 and v1.3, leading to 500 million high quality reads in total.
+
+The Material and Methods section of the original article is MIAMI compliant. In fact, the authors are transparent about all details of the experiment, both concerning sample collection, treatment and storing (and wet-lab procedures in general), and also concerning sequencing, and reads quality assessment. The sequencing data is stored and accessible in the Gene Expression Omnibus repository with the ID GSE63042.
+
+# Data preprocessing
+
+First, we imported raw data:
+
+```{r}
+data <- readRDS('/opt/omicsdata/datasets/SRP050000.rds')
+# other option for loading data
+# data <- readRDS("SRP050000.rds")
+cat("The dataset contains",  nrow(data), "genes and",  ncol(data), "samples.")
+```
+
+The imported object is a large RangedSummarizedExperiment containing 63.856 genes and 129 patient samples.
+
+Clinical information was extracted from the sample metadata in order to identify the clinical outcome associated with each patient.
+
+```{r}
+att <- colData(data)$sra.sample_attributes
+outcome <- sub(".*sirs outcomes;;([^|]+).*", "\\1", att)
+colData(data)$outcome <- outcome
+```
+
+The outcome variable includes the five original clinical groups described in the study.
+
+```{r outcome-table, message=FALSE, warning=FALSE, results='asis'}
+tab_outcome <- table(colData(data)$outcome)
+
+outcome_table <- as.data.frame(tab_outcome)
+colnames(outcome_table) <- c("Outcome", "Samples")
+
+outcome_table %>%
+  knitr::kable(
+    format = "html",
+    caption = "Clinical outcome groups",
+    align = c("l", "c"),
+    col.names = c("Outcome", "Number of samples")
+  ) %>%
+  kableExtra::kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE,
+    position = "center",
+    font_size = 12
+  ) %>%
+  kableExtra::row_spec(0, bold = TRUE, color = "white", background = "#6B8F71")
+```
+
+Since the aim of this report is to compare transcriptomic profiles between Septic shock and SIRS patients, we selected only samples belonging to these two groups for downstream analyses. The resulting dataset contained 33 Septic shock samples and 23 SIRS samples, for a total of 56 patient samples.
+
+```{r}
+data_sel <- data[, data$outcome %in% c('Septic shock', 'SIRS')]
+```
+
+Then we filtered genes characterized by low expression.
+
+```{r}
+data_sel <- data_sel[rowSums(assay(data_sel)) >= 10, ]
+cat("Now data_sel contains:", nrow(data_sel), "genes and", ncol(data_sel), "samples.")
+```
+
+This way, we reduced the dimension of the dataset to 45552 genes and 56 samples.
+
+# Exploratory analysis
+
+## Histogram and boxplot of pseudocounts
+
+We first examined the distribution of raw counts to assess the overall structure of the dataset. For this purpose, counts were transformed using log1p to reduce skewness and improve interpretability.
+
+```{r raw-count-histogram, fig.cap="**Figure 1.** Distribution of log1p-transformed raw counts.", fig.width=8, fig.height=5}
+raw_count <- assay(data_sel)
+log1p_count=log1p(raw_count)
+hist(log1p_count, main = '', xlab = expression(log(1 + raw_count)), ylab = "Frequency",
+  col = "#d9e8df", border = "#1b4d3e")
+```
+
+The histogram shows a strongly right-skewed distribution reflecting the presence of many lowly expressed genes alongside a few highly abundant transcripts.
+
+Then, we computed boxplots of log-transformed counts, with samples colored according to their clinical outcome (SIRS vs Septic Shock), in order evaluate whether global expression patterns differ between groups.
+
+```{r expression-boxplots, fig.cap="**Figure 2.** Distribution of log1p-transformed expression values across samples.", fig.width=8, fig.height=5}
+df= as.data.frame(log1p_count)
+df$gene=rownames(df)
+df_long=pivot_longer(df, cols= -gene, names_to="sample", values_to="Expression")
+
+outcome=data_sel$outcome
+names(outcome)=colnames(log1p_count)
+
+df_long$outcome= outcome[df_long$sample]
+
+ggplot(df_long, aes(x=sample, y=Expression, fill=outcome)) +geom_boxplot()+scale_fill_manual(values=c("SIRS"="hotpink", "Septic shock"="aquamarine"))+
+  labs(
+    x = "Sample",
+    y = "log1p expression")
+```
+
+The boxplots show comparable expression distributions across samples, suggesting the absence of major technical variability. However, differences in median and spread are still present, highlighting the need for normalization before downstream analyses.
+
+## MA and MD plots
+
+Then, we computed the MA plot which allowed us to assess the relationship between the average expression level (A) and the log-fold change (M) between samples, highlighting systematic biases that may not be immediately visible in a scatterplot.
+
+```{r raw-count-ma-plot, fig.cap="**Figure 3.** MA plot of log1p-transformed raw counts.", fig.width=8, fig.height=5}
+limma::plotMA(log1p(raw_count), main="",xlab = "A", ylab = "M")
+```
+
+In our case, the plot shows increased variability at low expression levels and a visible spread of points, particularly on the left side. This behavior is typical of RNA-seq data due to the discrete nature of low counts, but it may also reflect technical biases. The normalization we will do in the next section aims to remove these systematic effects, centering the distribution around zero, stabilizing variability across expression levels and making samples more comparable.
+
+We also computed an MD plot comparing two selected raw count samples (9 and 10):
+
+```{r raw-count-md-plot, fig.cap="**Figure 4.** MD plot comparing two raw count samples.", fig.width=8, fig.height=5}
+MDPlot(raw_count, c(9,10), main = '')
+```
+
+This plot shows a clear intensity-dependent trend, as the smooth curve deviates from zero across a wide range of expression values. In addition, variability is higher at low expression levels and becomes more stable as the mean expression increases, which is typical of RNA-seq data. Again, the observed pattern suggests that normalization is required to remove the dependence between mean expression and differences and to ensure comparability across samples.
+
+## RLE plot
+
+Then, we computed the RLE plot as a baseline quality-control visualization before normalization:
+
+```{r raw-count-rle-plot, fig.cap="**Figure 5.** RLE plot of raw counts across SIRS and Septic shock samples.", fig.width=8, fig.height=5}
+col=ifelse(data_sel$outcome=="SIRS", "hotpink", "aquamarine")
+plotRLE(raw_count, outline = FALSE, las = 2,
+        ylab = "RLE", main = "",
+        col = col, xaxt = "n")
+legend("topright",
+       legend = c("SIRS", "Septic shock"),
+       fill = c("hotpink", "aquamarine"),
+       bty = "n")
+```
+
+The RLE plot is consistent with what we already observed in the previous plot, as it shows the presence of residual variability across samples with several boxplots deviate from zero and show differences in spread. This further supports the need for normalization before downstream analyses. As expected, no clear separation between SIRS and Septic shock groups is evident at this stage of the analysis.
+
+## Principal component analysis
+
+We perfomed the Principal Component Analysis to explore the main sources of variability in our dataset and to evaluate wheter samples tend to cluster according to biological condition:
+
+```{r pca-screeplot, fig.cap="**Figure 6.** PCA scree plot.", fig.width=8, fig.height=5}
+pca <- prcomp(t(log1p(raw_count)))
+screeplot(pca, type = "lines", col="#1b4d3e")
+```
+
+The scree plot shows that most of the variability in the data is captured by PC1, while additional components contribute progressively less.
+
+```{r pca-plot, fig.cap="**Figure 7.** PCA plot.", fig.width=8, fig.height=5}
+df = as.data.frame(pca$x[, c(1,2)])
+colnames(df) = c("PC1", "PC2")
+
+df$outcome = colData(data_sel)$outcome
+
+ggplot(df, aes(x = PC1, y = PC2, color = outcome)) +
+  geom_point(size = 2) +
+  scale_color_manual(values = c(
+    "SIRS" = "hotpink",
+    "Septic shock" = "aquamarine"
+  )) +
+  theme_minimal()
+```
+
+The PCA plot does not show a clear separation between SIRS and septic shock samples: points from the two groups are largely overlapping, suggesting that the main sources of variability captured by the first two principal components are not associated with the outcome.
+
+## GC content bias analysis
+
+To investigate GC content bias, gene-level GC information was retrieved and matched to the dataset using Ensembl gene identifiers. Genes lacking GC content annotation were removed, and the dataset was filtered to retain only those with available GC information.
+
+```{r}
+ensid <- as.character(rowRanges(data_sel)$gene_id)
+ensid <- substr(ensid, 1, 15)
+
+gc <- getGeneLengthAndGCContent(id = ensid, org = "hg38", mode = "org.db")
+
+# remove genes with no information on GC content 
+gc <- gc[!is.na(gc[, 2]), ]
+rowData(data_sel)$ensid <- ensid
+data_sel <- data_sel[rowData(data_sel)$ensid  %in% rownames(gc), ]
+raw_count <- assay(data_sel)
+row.names(raw_count) <- row.names(gc)
+cat("Duplicated gene identifiers:", any(duplicated(row.names(raw_count)))) 
+```
+
+No duplicated gene identifiers were detected after matching gene expression data with GC-content information.
+
+We computed the GC-content bias:
+
+```{r gc-bias-plot, fig.cap="**Figure 8.** GC-content bias plot.", fig.width=8, fig.height=5}
+set <- newSeqExpressionSet(raw_count, phenoData = AnnotatedDataFrame(data.frame(conditions = factor(1:ncol(raw_count)),  row.names = colnames(raw_count))), featureData = AnnotatedDataFrame(data.frame(gc = gc[, 2], l = gc[, 1])))
+
+s <- EDASeq::biasPlot(set, "gc", ylim = c(0, 10), log = TRUE, legend = FALSE)
+```
+
+The relationship between GC content and gene expression shows a clear non-linear trend, with expression increasing up to intermediate GC values and decreasing thereafter. Some variability between sample-specific curves is observed, suggesting that the GC effect is not perfectly consistent across samples and may introduce bias that may affect downstream analyses. For this reason, GC normalization will be applied in the next step to correct this effect before performing between-sample normalization.
+
+To further assess GC-content bias, we plotted the distribution of log-expression differences between two selected samples across GC-content bins.
+
+```{r gc-bias-boxplot, fig.cap="**Figure 9.** GC-content bias boxplot.", fig.width=8, fig.height=5}
+lrt <- log1p(raw_count[, 9]) - log1p(raw_count[, 10]) # same samples used in the MD plot
+
+biasBoxplot(lrt, gc[, 2], outline = FALSE, xlab = "GC-content", ylab = "Gene expression", las = 2, cex.axis = 0.5,  xaxt = "n", col = "#d9e8df", border = "#1b4d3e"
+)
+```
+
+The boxplot shows that the log-expression differences between the two samples are not centered around zero across GC-content bins, confirming the presence of GC-dependent bias.
+
+# Normalization
+
+Normalization is required to eliminate systematic technical biases. It is a critical step as it ensures that differences in sequencing read counts reflect true biological variation.
+
+## Within Sample Normalization
+
+First, we applied sample normalization to correct for biological and technical biases specific to genomic features within a single biological sample, in particular gene length and GC-Content bias.
+
+To reduce GC content bias, we implemented the upper quartile normalization method in which, considering the expression counts of all genes of one sample, the third quartile is computed (not the median, which is often very close to zero in RNA-seq experiments). Then, all counts are divided by the third quartile value and then multiplied by $10^6$.
+
+```{r gc-bias-before-after, fig.cap="**Figure 10.** GC bias before and after within-sample normalization.", fig.width=10, fig.height=5}
+
+par(mfrow = c(1, 2))
+
+biasPlot(set, "gc", ylim = c(0, 10), log = TRUE, legend = FALSE, main = "Before normalization")
+
+wt <- withinLaneNormalization(set, "gc" , which = "upper", offset = TRUE)
+
+biasPlot(wt,"gc", ylim = c(0, 10),log = TRUE, legend = FALSE, main = "After normalization")
+
+par(mfrow = c(1, 1))
+```
+
+The performance of the upper quartile within sample normalization can be assessed by looking at the GC bias plot in Figure 10. The right panel (after normalization) shows much more consistent trends across samples, with the curves that have effectively converged into a unified band.
+
+We saved the results of this normalization in a large matrix object in order to apply it later to the data we will be analyzing.
+
+```{r}
+offset_gc <- offst(wt)
+```
+
+## Between Sample Normalization
+
+Between sample normalization is designed to eliminate technical variability across different sequencing libraries or independent samples and t is used to eliminate and correct differences in terms of sequencing depth.
+
+We implemented different between sample normalization methods in order to see which one worked better on this data. We used the following normalization techniques:
+
+-   **CPM (Count Per Million)**: gene counts of each sample are divided by the total number of mapped reads in the same sample and then multiplied by $10^6$.
+
+-   **Upper Quartile**: it works like the CPM but the division factor is the third quartile of the i-th sample.
+
+-   **TMM (Trimmed Mean of M-values)**: the scaling factor is computed after excluding genes with extreme expression values;
+
+-   **RLE (Relative log Expression)**: normalization based on sample-specific scaling factors computed from gene expression ratios relative to a reference across all samples.
+
+-   **Full Quantile**: normalization method that forces all samples to share the same statistical distribution by replacing counts with common ranked values across samples.
+
+```{r}
+# Full quantile normalization
+set_full <- betweenLaneNormalization(wt, which = "full", offset = TRUE)
+full <- set_full@assayData$normalizedCounts
+
+raw_count <- counts(wt)
+
+# RLE normalization
+lbs <- calcNormFactors(raw_count, method = "RLE")
+rle <- cpm(raw_count, lib.size = lbs * colSums(raw_count))
+
+# TMM normalization
+lbs <- calcNormFactors(raw_count, method = "TMM")
+tmm <- cpm(raw_count, lib.size = lbs * colSums(raw_count))
+
+# Upper quartile normalization
+lbs <- calcNormFactors(raw_count, method = "upperquartile")
+uq <- cpm(raw_count, lib.size = lbs * colSums(raw_count))
+
+tc <- cpm(raw_count)
+```
+
+We then assessed the performance of each normalization using boxplots and RLE plots.
+
+### Boxplots of normalized counts
+
+Boxplots of normalized gene counts should have a similar distribution and very close values of medians. The distributions of counts for each samples before normalization can be observed in the first boxplot.
+
+```{r normalization-boxplots, fig.cap="**Figure 11.**Comparison of expression distributions across between-sample normalization methods.", fig.width=10, fig.height=9}
+cols <- ifelse(colData(data_sel)$outcome == "SIRS", "hotpink", "aquamarine")
+
+par(mfrow = c(3, 2), mar = c(3, 4, 3, 1))
+
+boxplot(log2(raw_count + 1), outline = FALSE, las = 2,
+        ylab = "log(count+1)", main = "Before normalization",
+        xaxt = "n", col = cols, border = "#1b4d3e")
+legend("topright",
+       legend = c("SIRS", "Septic shock"),
+       fill = c("hotpink", "aquamarine"),
+       bty = "n",
+       cex = 0.8)
+
+boxplot(log2(tc + 1), outline = FALSE, las = 2,
+        ylab = "log(count+1)", main = "Boxplot CPM",
+        xaxt = "n", col = cols, border = "#1b4d3e")
+legend("topright",
+       legend = c("SIRS", "Septic shock"),
+       fill = c("hotpink", "aquamarine"),
+       bty = "n",
+       cex = 0.8)
+
+boxplot(log2(rle + 1), outline = FALSE, las = 2,
+        ylab = "log(count+1)", main = "Boxplot RLE",
+        xaxt = "n", col = cols, border = "#1b4d3e")
+legend("topright",
+       legend = c("SIRS", "Septic shock"),
+       fill = c("hotpink", "aquamarine"),
+       bty = "n",
+       cex = 0.8)
+
+boxplot(log2(tmm + 1), outline = FALSE, las = 2,
+        ylab = "log(count+1)", main = "Boxplot TMM",
+        xaxt = "n", col = cols, border = "#1b4d3e")
+legend("topright",
+       legend = c("SIRS", "Septic shock"),
+       fill = c("hotpink", "aquamarine"),
+       bty = "n",
+       cex = 0.8)
+
+boxplot(log2(uq + 1), outline = FALSE, las = 2,
+        ylab = "log(count+1)", main = "Boxplot Upper quartile",
+        xaxt = "n", col = cols, border = "#1b4d3e")
+legend("topright",
+       legend = c("SIRS", "Septic shock"),
+       fill = c("hotpink", "aquamarine"),
+       bty = "n",
+       cex = 0.8)
+
+boxplot(log2(full + 1), outline = FALSE, las = 2,
+        ylab = "log(count+1)", main = "Boxplot full",
+        xaxt = "n", col = cols, border = "#1b4d3e")
+
+legend("topright",
+       legend = c("SIRS", "Septic shock"),
+       fill = c("hotpink", "aquamarine"),
+       bty = "n",
+       cex = 0.8)
+
+par(mfrow = c(1, 1))
+```
+
+CPM normalization is not well suited for RNA-seq data and therefore its performance is not optimal and significant variability in terms of distribution can be appreciated in the boxplot.
+
+Overall, normalization methods which worked best were RLE and TMM. In both cases, all samples had similar median and the distributions were almost totally aligned.
+
+It is also important to point out that this kind of performance assessment cannot be used to evaluate full quantile and upper quartile normalization. In fact, these methods lead to perfectly equal statistical distributions and distributions perfectly aligned in terms of third quartile, respectively. Therefore, to assess the quality of normalization we must rely on RLE plots.
+
+### RLE plots of normalized counts
+
+RLE plots are diagnostic plots that help visualize the differences between distributions of read counts across samples. To obtain this plot, the log ratio of gene counts of each sample and the median of the gene count across all samples is computed. The distribution of samples should be centered around zero.
+
+```{r normalization-rle-plots, fig.cap="**Figure 12.** Comparison of RLE distributions across normalization methods.", fig.width=10, fig.height=9}
+col <- data_sel$outcome
+col$color <- ifelse(col == 'Septic shock', 'aquamarine', 'hotpink')
+
+par(mfrow = c(3, 2),mar = c(3, 4, 3, 1) )
+
+EDASeq::plotRLE(raw_count, outline = FALSE,  las=2, col=col$color,
+        ylab = "RLE", main = "RLE plot before normalization", xaxt='n')
+legend("topright", legend = c("SIRS", "Septic shock"),
+       fill = c("hotpink", "aquamarine"), bty = "n", cex = 0.7)
+
+EDASeq::plotRLE(tc, outline = FALSE,  las=2, col=col$color,
+        ylab = "RLE", main = "RLE plot CPM", xaxt='n')
+legend("topright", legend = c("SIRS", "Septic shock"),
+       fill = c("hotpink", "aquamarine"), bty = "n", cex = 0.7)
+
+EDASeq::plotRLE(tmm, outline = FALSE,  las=2, col=col$color,
+        ylab = "RLE", main = "RLE plot TMM", xaxt='n')
+legend("topright", legend = c("SIRS", "Septic shock"),
+       fill = c("hotpink", "aquamarine"), bty = "n", cex = 0.7)
+
+EDASeq::plotRLE(rle, outline = FALSE,  las=2, col=col$color,
+        ylab = "RLE", main = "RLE plot RLE", xaxt='n')
+legend("topright", legend = c("SIRS", "Septic shock"),
+       fill = c("hotpink", "aquamarine"), bty = "n", cex = 0.7)
+
+EDASeq::plotRLE(uq, outline = FALSE,  las=2, col=col$color,
+        ylab = "RLE", main = "RLE plot upper quartile", xaxt='n')
+legend("topright", legend = c("SIRS", "Septic shock"),
+       fill = c("hotpink", "aquamarine"), bty = "n", cex = 0.7)
+
+EDASeq::plotRLE(full, outline = FALSE,  las=2, col=col$color,
+        ylab = "RLE", main = "RLE plot full", xaxt='n')
+legend("topright", legend = c("SIRS", "Septic shock"),
+       fill = c("hotpink", "aquamarine"), bty = "n", cex = 0.7)
+
+
+par(mfrow = c(1, 1))
+```
+
+Before normalization, the RLE plot shows different distributions for different samples, where medians are not aligned on zero. The same condition can be observed for CPM normalization.
+
+Both RLE and TMM yield highly concordant results. As a matter of fact, both approaches successfully align sample medians to zero and lead to similar distributions across samples. In addition, distributions are tight around zero (values on y-axis are smaller than one in both cases).
+
+The upper quartile method leads to a slightly bigger variance in terms of distributions (this can be seen by the values of the y-axis). Similarly, the full quantile method leads to very high variance.
+
+Considering everything observed in boxplots and RLE plots, we decided to apply the **TMM** normalization in later analysis steps.
+
+### Sample correlation after normalization
+
+To assess the presence of outlier samples after normalization, we used a heatmap based on the Pearson correlation coefficient.
+
+```{r correlation-heatmap, fig.cap="**Figure 13.** Sample correlation heatmap.", fig.width=8, fig.height=6}
+colnames <- colnames(tmm)
+colnames(tmm) <- substr(colnames(tmm), 9, 12)
+cor_mat <- cor(log1p(tmm))
+
+corrplot(cor_mat, method = "color", order = 'hclust', tl.cex=0.2)
+```
+
+Overall, all samples are highly correlated. This indicates that within-sample and between-sample normalization worked properly.
+
+Interestingly, in the correlation plot a cross-shaped separation can be observed, indicating a drop in correlation between specific samples and the rest of the dataset. Since the intra-group correlation within the main blocks remains very high, this pattern confirms that the normalization did not erase the true biological differences between the two experimental conditions.
+
+## Normalization assessment through PCA
+
+To conclude this section, we used the PCA to evaluate the normalization performance.
+
+```{r pca-tmm-screeplot, fig.cap="**Figure 14.** PCA scree plot after TMM normalization.", fig.width=8, fig.height=5}
+pca2 <- prcomp(t(log1p(tmm)))
+screeplot(pca2, type = 'lines', col = '#1b4d3e', main = '')
+```
+
+```{r pca-tmm-plot, fig.cap="**Figure 15.** PCA plot after TMM normalization.", fig.width=8, fig.height=5}
+par(mfrow=c(1,1))
+EDASeq::plotPCA(tmm, k=3, labels=F, col=col$color, pch=20)
+```
+
+The PCA scree plot (Figure 14) reveals a relatively smooth descent in eigenvalues (the first three PCs cover roughly 45% of the variance). Nevertheless, the pairwise PC score plots (Figure 15) highlight the fact that the biological conditions (Septic Shock and SIRS) are not separated by PC1. Instead, PC2 offers the best visual separation between the two groups. In fact, the SIRS group (pink) samples tend to showcase higher PC2 values with respect to Septic Shock (turqouise).
+
+# Differential expression analysis
+
+In order to see which genes are differentially expressed between Septic Shock and SIRS, we used a generalized linear model using the Negative Binomial distribution implemented in the **edgeR package**. The dataset was first converted into a DGEList object, which contains information about the library size and count data.
+
+After this we performed both the between samples normalization (with the TMM method) and the within samples normalization (to remove the GC-content related bias).
+
+Finally, we designed a model matrix to analyze the differences between the groups based on the outcome variable. This matrix synthesizes the information of samples in a numerical matrix which can be used by the statistical model. SIRS was used as the reference group in the design matrix; therefore, positive logFC values correspond to genes upregulated in Septic Shock relative to SIRS.
+
+```{r, warning=FALSE}
+data_sel$outcome <- as.character(data_sel$outcome)
+
+colData(data_sel)$outcome <- factor(
+  colData(data_sel)$outcome,
+  levels = c("SIRS", "Septic shock")
+)
+
+design <- model.matrix(~ outcome, data = colData(data_sel))
+
+dge <- DGEList(assay(data_sel))
+dge <- calcNormFactors(dge, method="TMM")
+dge <- scaleOffset(dge, offset_gc)
+dge <- estimateDisp(dge, design)
+```
+
+We generated the mean-variance plot to asses heteroscedasticity of the RNA-seq count data.
+
+```{r mean-variance-plot, fig.cap="**Figure 16.** Mean-variance relationship in RNA-seq count data.", fig.width=8, fig.height=5}
+plotMeanVar(dge, show.raw.vars = TRUE, show.ave.raw.vars = F, NBline = TRUE, show.tagwise.vars = TRUE)
+```
+
+The visualization in Figure 16 confirms the presence of overdispersion, since the variance increases quadratically with respect to the mean. In black, the line representing the poisson model can be seen: this line fails to represent the data properly and, thus, this probability distribution cannot be used to investigate differential gene expression. In fact, the underfitting produced by Poisson would lead to a high false positive rate. On the other hand, in blue, the line representing the negative binomial fits the data correctly, following the trend of the mean-variance relationship produced by overdispersion.
+
+At this point, we fitted the generalized linear model based on the Negative Binomial to each gene.
+
+```{r, warning=FALSE}
+fit <- glmFit(dge, design)
+```
+
+Moreover, we performed a Likelihood Ratio Test to compare two hypotheses:
+
+-   $H_0 :$ the outcome variable (Septic Shock and SIRS) does not influence gene expression (null model);
+
+-   $H_1 :$ gene expression varies based on the group (complete model).
+
+Using the glmLRT function, the likelihood of the null and full models was compared for each gene: genes for which the full model provided a significantly better fit were considered differentially expressed between Septic Shock and SIRS samples.
+
+```{r}
+res <- glmLRT(fit, coef=2)
+```
+
+The results stored in the *res* object had to be processed in order to correct for multiple testing. In fact, we used the topTags function to correct the p-values with the Benjamini-Hochberg procedure and to compute the False Discovery Rate (FDR), in order to reduce the number of false positives.
+
+The FDR was then used to extract from the topTags table only differentially expressed genes.
+
+```{r}
+tab <- topTags(res, n=Inf)
+tab <- tab$table
+differentially_expressed <- tab[tab$FDR <0.15,] 
+cat("By using an FDR threshold of 0.15, we extracted a list of",
+    nrow(differentially_expressed),
+    "differentially expressed genes.")
+```
+
+By using an FDR threshold, we extracted a list of 61 genes, which were down-/up-regulated in Septic Shock or SIRS groups. More specifically, we chose a threshold value of 0.15, as the standard 0.05 threshold only led to 10 differentially expressed genes, significantly reducing the power of the following analysis steps.
+
+With the log-Fold Change value we could see which genes were up-regulated and which genes were down-regulated. Because in our design matrix the reference group was SIRS, if the log Fold Change of a gene is positive, it means that it is up-regulated in the Septic Shock group with respect to SIRS.
+
+In order to assess the overall distribution of differentially expressed genes we used the MD plot that shows the relationship between the log-Fold Change (logFC) and the average expression magnitude (average log CPM).
+
+```{r deg-md-plot, fig.cap="**Figure 17.** MD plot of differentially expressed genes.", fig.width=8, fig.height=5}
+de_status <- decideTests(res, p.value = 0.15, adjust.method = "BH")
+plotMD(res, status = de_status, main = '')
+```
+
+In the plot, the majority of genes appears to be equally expressed in the two conditions: a distribution around logFC = 0 shows that the normalization worked properly. Moreover, significant differentially expressed genes are observed across different expression levels, with a predominance of positive logFC values corresponding to genes upregulated in Septic Shock samples.
+
+Similarly, we visualized the results with a Volcano Plot, a scatter plot where we plotted significance of differential expression (p-value) versus magnitute of change (logFC).
+
+```{r volcano-plot, fig.cap="**Figure 18.** Volcano plot.", fig.width=8, fig.height=5}
+names <- row.names(differentially_expressed)
+
+tab$sign <- NA
+tab$sign[tab$logFC < 0] <- "Down" #Down in septic
+tab$sign[tab$logFC > 0] <- "Up"
+tab$sign[tab$FDR >= 0.15] <- "NoSig"
+tab$gene <- rownames(tab)
+
+ggplot(tab, aes(x = logFC, y = -log10(PValue), color = sign)) + geom_point() + theme_classic() +
+  scale_color_manual(values = c("Down" = "blue", "Up" = "red", "NoSig" = "black")) +
+  geom_text_repel(data = tab[1:20, ], aes(label = gene), size = 2.5, max.overlaps = 20) 
+```
+
+Up-regulated, that are the ones that exhibit a positive logFC, are shown in red: they are significantly more expressed in the Septic Shock group compared to the reference SIRS. Notable transcripts include ENSG00000163958.13 and ENSG00000167680.15, which show high statistical significance and strong fold induction.
+
+In blue we see transcripts which show a negative logFC, indicating higher expression in SIRS than in Septic Shock.Examples include ENSG00000159251.6 and ENSG0000007350.16.
+
+In order to evaluate the performance of the model, the distribution of raw p-values was analyzed. Ideally, a point mass should be observed at 0, followed by a uniform distribution.
+
+```{r pvalue-histogram, fig.cap="**Figure 19.** P-values distribution.", fig.width=8, fig.height=5}
+hist(tab$PValue, main="", xlab = "Raw p-value", col = "#d9e8df",
+  border = "#1b4d3e")
+```
+
+However, the plot shows that the frequency of raw p-values is not properly uniform. Thus, the model was not optimal.
+
+In order to obtain a better fit of the data by the model, we used the **Remove Unwanted Variance (RUV) method**. With this approach, we could remove unknown batch effects by estimating the confounding factors directly from the data.
+
+To do this, we extracted from the data genes which were used as negative controls. In our case, we used the 1000 “less differentially expressed” genes, which were the genes with the highest p-values in the list of differentially expressed genes.
+
+```{r}
+design_initial <- model.matrix(~ outcome, data = colData(data_sel))
+fit_initial <- glmFit(dge, design_initial)
+resids <- residuals(fit_initial, type = "deviance")
+
+res_initial <- glmLRT(fit_initial, coef = 2)
+res_tab <- as.data.frame(res_initial$table)
+non_degs <- rownames(res_tab[order(res_tab$PValue, decreasing = TRUE), ])[1:1000]
+```
+
+At this point, we could then use the residuals of the original model to obtain the W factor (a matrix of one column containing the unwanted variance factor for each sample in the data).
+
+After creating the unwanted variance array, we added it to the data set and used it in the design matrix. Then, we repeated the same steps performed before.
+
+```{r}
+set_ruv <- RUVr(dge$counts, non_degs, k = 1, resids)
+
+data_sel$W1 <- set_ruv$W[,1]
+
+design_final <- model.matrix(~ W1 + outcome, data = colData(data_sel))
+
+dge_final <- estimateDisp(dge, design_final)
+fit_final <- glmFit(dge_final, design_final)
+
+res_final <- glmLRT(fit_final, coef = 3)
+```
+
+As we did before, we used topTags and then extracted differentially expressed genes using an FDR threshold.
+
+```{r}
+tab <- topTags(res_final, n=Inf)
+tab <- tab$table
+differentially_expressed <- tab[tab$FDR <0.05,] 
+cat("Number of differentially expressed genes:",
+    nrow(differentially_expressed))
+```
+
+In this case the threshold used to extract differentially expressed genes was 0.05, which led to the extraction of 538 genes. Compared to the previous model, the power increased significantly: we found more genes with a stricter FDR threshold.
+
+Again, to visualize the results, we used the MD plot and the Volcano plot.
+
+```{r final-md-plot, fig.cap="**Figure 20.** MD plot after RUV correction.", fig.width=8, fig.height=5}
+plotMD(res_final, main = '')
+```
+
+```{r final-volcano-plot, fig.cap="**Figure 21.** Volcano plot after RUV correction.", fig.width=8, fig.height=5}
+names <- row.names(differentially_expressed)
+
+tab$sign <- NA
+tab$sign[tab$logFC < 0] <- "Down"
+tab$sign[tab$logFC > 0] <- "Up"
+tab$sign[tab$FDR >= 0.05] <- "NoSig"
+tab$gene <- rownames(tab)
+
+ggplot(tab, aes(x = logFC, y = -log10(PValue), color = sign)) + geom_point() + theme_classic() +
+  scale_color_manual(values = c("Down" = "blue", "Up" = "red", "NoSig" = "black")) +
+  geom_text_repel(data = tab[1:20, ], aes(label = gene), size = 2.5, max.overlaps = 20) 
+```
+
+In both cases, it can easily be seen that the number of differentially expressed genes found by the model is higher. These results suggest that unwanted sources of variability were masking part of the biological signal in the original analysis and that RUV correction improved the ability of the model to detect transcriptional differences between Septic Shock and SIRS samples.
+
+```{r}
+up_septic <- tab[tab$FDR < 0.05 & tab$logFC > 0, ]
+up_sirs <- tab[tab$FDR < 0.05 & tab$logFC < 0, ]
+total_degs <- nrow(differentially_expressed)
+
+cat("Genes upregulated in Septic Shock:",
+    nrow(up_septic), "(", round(nrow(up_septic) / total_degs * 100, 1), "% )\n")
+
+cat("Genes upregulated in SIRS:",
+    nrow(up_sirs), "(", round(nrow(up_sirs) / total_degs * 100, 1), "% )\n")
+```
+
+Most differentially expressed genes showed positive logFC values, indicating higher expression in Septic Shock compared to SIRS, indicating that the transcriptional differences between the two conditions are mainly driven by genes upregulated in Septic Shock samples.
+
+Finally, to assess the quality of the fit, the histogram of raw p-value frequencies was used.
+
+```{r final-pvalue-histogram, fig.cap="**Figure 22.** P-value distribution after RUV correction.", fig.width=8, fig.height=5}
+hist(tab$PValue, main="", xlab = "Raw p-value",col = "#d9e8df",
+  border = "#1b4d3e")
+```
+
+With respect to the original model, the distribution of raw p-values confirmed that the model was working properly. In fact, there is a point mass at 0 and, for higher p-vlaues, we obtained a uniform distribution.
+
+# Cluster analysis
+
+In order to identify the presence of patterns in the data, we performed a cluster analysis. This way, if the expression pattern was different between the two groups, we expected to observe it.
+
+First, we produced a heatmap.
+
+```{r deg-heatmap, fig.cap="**Figure 23.** Heatmap of differentially expressed genes.", fig.width=8, fig.height=6}
+raw_count <- dge_final$counts
+lbs <- calcNormFactors(raw_count, method = "TMM")
+tmm <- cpm(raw_count, lib.size = lbs * colSums(raw_count))
+
+names <- rownames(differentially_expressed)
+data_degs <- tmm[names, ]
+
+Col <- data.frame(Outcome = data_sel$outcome)
+rownames(Col) <- colnames(data_sel)
+
+ann_colors = list(Outcome = c("Septic shock" = "aquamarine", "SIRS" = "hotpink"))
+
+heatmap_degs <- pheatmap(log1p(data_degs), show_colnames = FALSE, show_rownames = FALSE, scale = 'row',
+                         drop_levels = TRUE, annotation_col = Col, annotation_colors = ann_colors)
+```
+
+This heat map represents the hierarchical clustering of differentially expressed genes (DEGs) between patients with Septic shock and SIRS. In the columns there are the samples, in the rows the genes. Red/orange boxes indicate genes expressed above the mean for that specific transcript across all samples, whereas blue indicates genes expressed below the mean.
+
+In the heat map two predominant groups can be distinguished by means of gene expression pattern, which correspond to the Septic Shock and SIRS groups. The separation is not perfect, but this could be the result of Sepsis being an heterogeneous syndrome where the diagnosis of patients is not always totally clear.
+
+In order to assess the robustness of the clustering results, the silhouette plot was computed. In fact, with this kind of plot we could get a quantitative measure of how well each individual patient fits within their assigned cluster.
+
+```{r silhouette-plot, message=FALSE, fig.cap="**Figure 24.**Silhouette analysis of sample clustering.", fig.width=8, fig.height=5}
+cut <- cutree(heatmap_degs$tree_col, k = 2)
+
+distance_matrix <- dist(t(log1p(data_degs)))
+plot(silhouette(cut, distance_matrix), col=c("aquamarine", "hotpink"), border=NA, main='')
+```
+
+The SIRS cluster (pink) exhibits the highest structural stability between the two (with a average silhouette width of 0.35). The positive silhouette widths, reaching approximately 0.5, indicate that these patients possess a well-defined transcriptomic signature. There are no negative values in this cluster, suggesting that the SIRS molecular profile is relatively distinct and homogeneous within this dataset.
+
+The Septic Shock group has a lower average width (0.18), which indicates significant internal variability. While the majority of patients show a correct assignment, the plot reveals a subset of samples with negative silhouette values. This means that these individuals are clinically diagnosed with Septic shock but are transcriptionally more similar to the SIRS group.
+
+This was observed by the authors of the reference article as well. In fact, they observed that many Septic Shock patients have a 'muted' immune response. This happens especially when patients are either near or in the state of Sepsis collapse.
+
+# Gene set analysis
+
+## Gene set analysis with ORA Method
+
+We performed the gene set analysis through **Over-Representation Analysis (ORA)** using the *ClusterProfiler* package. ORA was applied to KEGG pathways, Reactome pathways, and Gene Ontology categories using the functions *enrichKEGG()*, *enrichPathway()*, and *enrichGO()*, respectively. All these functions implement the Fisher exact test to evaluate whether specific functional categories are over-represented among the differentially expressed genes compared to what we would except by chance, given the size of the universe.
+
+The formula of the Fisher exact test is the following: 
+$$
+P(X \geq k) =
+\sum_{i=k}^{\min(M,n)}
+\frac{\binom{M}{i}\binom{N-M}{n-i}}{\binom{N}{n}}
+$$
+
+where $N$ is the total number of genes in the universe, $M$ is the number of genes belonging to the functional category, $n$ is the number of differentially expressed genes, and $k$ is the number of overlapping genes between the category and the differentially expressed gene list.
+
+First, we defined the two gene sets required for ORA: the list of differentially expressed genes (DEGs) and the background universe, consisting of all genes tested in the differential expression analysis.
+
+```{r message=FALSE}
+deg <- differentially_expressed
+
+tab <- topTags(res_final, n = Inf)$table
+universo <- row.names(tab)
+sign <- row.names(deg)
+
+universo <- sub("\\..*$", "", universo) #annotation
+sign <- sub("\\..*$", "", sign)
+
+universo.entrez <- mapIds(org.Hs.eg.db, 
+                    keys = universo, 
+                    column = "ENTREZID",
+                    keytype = "ENSEMBL")  
+
+sign.entrez <- mapIds(org.Hs.eg.db,
+                    keys = sign, 
+                    column = "ENTREZID",
+                    keytype = "ENSEMBL")
+
+universo.entrez <- as.character(universo.entrez)
+sign.entrez <- as.character(sign.entrez)
+
+geneList_entrez <- deg$logFC
+names(geneList_entrez) <- sign.entrez
+
+geneList_entrez <- geneList_entrez[!is.na(names(geneList_entrez))]
+geneList_entrez <- geneList_entrez[!duplicated(names(geneList_entrez))]
+
+
+cat("Number of significant DEGs mapped to Entrez IDs:",
+    length(sign.entrez), "\n")
+
+cat("Number of background genes mapped to Entrez IDs:",
+    length(universo.entrez), "\n")
+```
+
+The final DEG list contained 537 genes, while the background universe consisted of 23.331 genes.
+
+#### KEGG pathways
+
+Using the Entrez ID vectors created previously, we performed ORA on KEGG pathways with the *enrichKEGG()* that tested whether any KEGG pathway was significantly enriched among the DEGs using Fisher’s exact test. P-values were adjusted for multiple testing using the Benjamin-Hochberg method, and pathways with an adjusted p-value below 0.05 were considered significant.
+
+```{r, message=FALSE}
+kk <- enrichKEGG(gene = sign.entrez,
+                 universe = universo.entrez,
+                 organism = 'hsa',
+                 keyType = 'ncbi-geneid', 
+                 pvalueCutoff = 0.05, 
+                 pAdjustMethod = "BH") 
+cat("Number of significantly enriched KEGG pathways identified:",
+    dim(kk)[1], "\n")
+```
+
+```{r kegg-enrichment-table, message=FALSE, warning=FALSE, results='asis'}
+kk_table <- as.data.frame(kk) %>%
+  dplyr::select(ID, Description, GeneRatio, BgRatio, Count, p.adjust) %>%
+  dplyr::arrange(p.adjust)
+
+kk_table %>%
+  kable(
+    format = "html",
+    caption = "Enriched KEGG pathways identified by ORA",
+    digits = 3,
+    col.names = c("KEGG ID", "Pathway", "Gene ratio", "Background ratio", "Gene count", "Adjusted p-value")
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = TRUE,
+    position = "left",
+    font_size = 12
+  ) %>%
+  row_spec(0, bold = TRUE, color = "white", background = "#6B8F71")
+```
+
+The analysis returned 16 enriched KEGG pathways, which are listed in the table below and further visualized using a dotplot and a cnetplot.
+
+```{r kegg-enrichment-plots, message=FALSE, warning=FALSE, fig.cap="**Figure 25.** KEGG pathway enrichment analysis.", fig.width=14, fig.height=6.5}
+
+p1 <- dotplot(kk, showCategory = 17, font.size = 10) +
+  ggtitle("A. KEGG enrichment dotplot") +
+  theme(plot.margin = margin(10, 35, 10, 10))
+
+p2 <- cnetplot(kk, showCategory = 8, node_label = "category", foldChange=geneList_entrez) +
+  ggtitle("B. Shared genes across enriched pathways") + 
+  theme(plot.margin = margin(10, 10, 10, 35)) + scale_colour_gradient2(
+    low = "blue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    limits = c(-2, 2),
+    oob = scales::squish
+  ) 
+
+(p1 | p2) +
+  plot_layout(widths = c(1.15, 1)) &
+  theme(plot.margin = margin(10, 15, 10, 15))
+```
+
+**Figure 25.A** shows that several pathways related to immune response, inflammatory signaling, and host-pathogen interaction were significantly enriched among the DEGs, consistently with the biological context of sepsis and septic shock. In particular, *Shigellosis*, *Salmonella infection*, and *Tuberculosis* showed the highest GeneRatio values.
+
+On the other side, the gene-concept network in **Figure 25.B** shows that several KEGG categories share common genes, suggesting that the enrichment signal is not driven by completely independent pathways, but rather by groups of genes involved in interconnected biological processes. In particular *TNF signaling pathway*, *Th17 cell differentiation*, *Tuberculosis*, *Shigellosis*, and *Salmonella infection*, appeared strongly interconnected through shared DEGs. Gene nodes were additionally colored according to their logFC values, allowing visualization of the regulation direction of the DEGs contributing to each pathway. Most genes showed positive logFC values, suggesting that the enrichment signal was predominantly driven by genes upregulated in Septic Shock relative to SIRS.
+
+Although most genes contributing to the enriched inflammatory pathways showed positive logFC values, a smaller subset of genes appeared downregulated. To further investigate this aspect and given its relevant biological role in sepsis, the TNF signaling pathway was visualized using Pathview.
+
+```{r pathview-tnf-plot, message=FALSE, warning=FALSE, fig.cap="**Figure 26.** KEGG TNF signaling pathway visualization generated with pathview.", fig.width=8, fig.height=5}
+pathview(gene.data = geneList_entrez, pathway.id = "hsa04668", species = "hsa")
+knitr::include_graphics("hsa04668.pathview.png")
+```
+
+Pathview visualization shows that differentially expressed genes are mainly involved selected inflammatory and signaling modules. Upregulated genes included components of the NF-kB/MAPK branches, such as NF-kB, MKK3/6 and p38, together with downstream inflammatory and immune-related genes including IL1B, FAS, SOCS3, TNFAIP3, MMP9 and ICAM1. In contrast, only a limited number of genes, such as CCL5 and MSK1/2, appeared downregulated. This suggests that the enrichment of the TNF signaling pathway is driven by the selective modulation of specific inflammatory branches rather than by a uniform alteration of the whole pathway.
+
+### Reactome Pathways
+
+We repeated the same ORA approach using the **Reactome database** (with *enrichPathway()* function), to compare the KEGG results with an alternative pathway annotation database. The same significance threshold and multiple testing correction were applied, using an adjusted p-value cutoff of 0.05 and the Benjamini-Hochberg method.
+
+```{r message=FALSE}
+kk2 <- enrichPathway(gene = sign.entrez,
+                 universe = universo.entrez,
+                 organism = 'human',
+                 pvalueCutoff = 0.05,
+                 pAdjustMethod = "BH")
+
+cat("Number of significantly enriched Reactome pathways identified:",
+    dim(kk2)[1], "\n")
+```
+
+The analysis identified 10 significantly enriched Reactome pathways, which are listed in the table below and further visualized using a dotplot and a cnetplot.
+
+```{r reactome-enrichment-table, message=FALSE, warning=FALSE, results='asis'}
+reactome_table <- as.data.frame(kk2) %>%
+  dplyr::select(ID, Description, GeneRatio, BgRatio, Count, p.adjust) %>%
+  dplyr::arrange(p.adjust)
+
+reactome_table %>%
+  kable(
+    format = "html",
+    caption = "Enriched Reactome pathways identified by ORA",
+    digits = 3,
+    col.names = c("Reactome ID", "Pathway", "Gene ratio", "Background ratio", "Gene count", "Adjusted p-value")
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = TRUE,
+    position = "left",
+    font_size = 12
+  ) %>%
+  row_spec(0, bold = TRUE, color = "white", background = "#6B8F71")
+```
+
+```{r reactome-enrichment-plots, message=FALSE, warning=FALSE, fig.cap="**Figure 27.** Reactome pathway enrichment analysis.", fig.width=14, fig.height=6.5}
+
+p1 <- dotplot(kk2, showCategory = 15, font.size = 10) +
+  ggtitle("A. Reactome enrichment dotplot") +
+  theme(plot.margin = margin(10, 35, 10, 10))
+
+p2 <- cnetplot(
+  kk2,
+  showCategory = 8,
+  node_label = "category",
+  foldChange = geneList_entrez
+) +
+  ggtitle("B. Shared DEGs and their regulation direction") +
+  theme(plot.margin = margin(10, 10, 10, 35)) +
+  scale_colour_gradient2(
+    low = "blue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    limits = c(-2, 2),
+    oob = scales::squish
+  )
+
+(p1 | p2) +
+  plot_layout(widths = c(1.15, 1)) &
+  theme(plot.margin = margin(10, 15, 10, 15))
+```
+
+Figure 27.A shows that the most significantly enriched categories are mainly associated with innate immune response, inflammatory signaling, neutrophil activation, interleukin-mediated signaling, and Fc receptor-related processes. In particular, *Neutrophil degranulation* and *Signaling by Interleukins* showed the highest GeneRatio values and strongest enrichment significance. Additional enriched pathways included *FCGR activation* and *FCGR-dependent phagocytosis*.
+
+The gene-concept network in the Figure 27.B shows that several immune-related categories shared a substantial proportion of genes; in particular, pathways associated with neutrophil degranulation, interleukin signaling and FCGR activation appeared strongly interconnected through shared differentially expressed genes. Gene nodes were additionally colored according to their logFC values, showing that most shared DEGs displayed positive regulation in Septic Shock relative to SIRS, although a smaller subset of genes appeared downregulated.
+
+#### Gene Ontology categories
+
+We run the same analyses using GO terms using the Biological Process (BP) the Molecular function (MF) and the Cellular component (CC) categories:
+
+```{r}
+# GO Biological Process
+ego_bp <- enrichGO(gene = sign.entrez,
+                   universe = universo.entrez,
+                   OrgDb = org.Hs.eg.db,
+                   keyType = "ENTREZID",
+                   ont = "BP",
+                   pvalueCutoff = 0.05,
+                   pAdjustMethod = "BH",
+                   readable = TRUE)
+
+# GO Molecular Function
+ego_mf <- enrichGO(gene = sign.entrez,
+                   universe = universo.entrez,
+                   OrgDb = org.Hs.eg.db,
+                   keyType = "ENTREZID",
+                   ont = "MF",
+                   pvalueCutoff = 0.05,
+                   pAdjustMethod = "BH",
+                   readable = TRUE)
+
+# GO Cellular Component
+ego_cc <- enrichGO(gene = sign.entrez,
+                   universe = universo.entrez,
+                   OrgDb = org.Hs.eg.db,
+                   keyType = "ENTREZID",
+                   ont = "CC",
+                   pvalueCutoff = 0.05,
+                   pAdjustMethod = "BH",
+                   readable = TRUE)
+
+```
+
+```{r go-enrichment-plots, message=FALSE, warning=FALSE, fig.cap="**Figure 28.** Gene Ontology enrichment analysis.", fig.width=20, fig.height=6}
+
+p_bp <- dotplot(ego_bp, showCategory = 15, font.size = 8) +
+  ggtitle("A. Biological Process") +
+  theme(plot.margin = margin(10, 40, 10, 10))
+
+p_mf <- dotplot(ego_mf, showCategory = 15, font.size = 8) +
+  ggtitle("B. Molecular Function") +
+  theme(plot.margin = margin(10, 25, 10, 20))
+
+p_cc <- dotplot(ego_cc, showCategory = 15, font.size = 8) +
+  ggtitle("C. Cellular Component") +
+  theme(plot.margin = margin(10, 40, 10, 20))
+
+(p_bp | p_mf | p_cc) +
+  plot_layout(widths = c(1.35, 0.75, 1.35))
+```
+
+Figure 28 summarizes the GO enrichment analysis across the three main Gene Ontology categories: Biological Process (BP, figure 28.A), Molecular Function (MF, figure 28.B), and Cellular Component (CC, figure 28.C). BP terms mainly highlightes inflammatory and immune-related processes (including inflammatory response, leukocyte activation, and response to lipopolysaccharide), the MF category identified immune receptor activity as the main enriched molecular function while CC terms were mainly associated with secretory granules, vesicle lumen and membrane-associated immune compartments.
+
+Together KEGG, Reactome, and GO enrichment analyses converged on the same biological interpretation:
+
+1.  KEGG enrichment highlighted pathways related to immune response, inflammatory signaling, and host-pathogen interaction;
+
+2.  Reactome provided a more process-oriented and mechanistic representation of these signals, emphasizing neutrophil degranulation, interleukin signaling, Fc gamma receptor activation, and phagocytosis;
+
+3.  GO enrichment further supported these findings by identifying inflammatory response, immune regulation, leukocyte activation, and response to lipopolysaccharide among the most significantly enriched Biological Process terms.
+
+From this analysis section we can conclude that the enrichment analyses consistently indicated a strong immune-inflammatory component underlying the transcriptional differences between Septic Shock and SIRS. Since ORA was performed on the complete set of DEGs, the enriched pathways mainly represent biological processes associated with the overall comparison between the two conditions rather than formal pathway-level activation scores. However, by integrating logFC information into gene–concept networks and pathway visualizations, it was possible to explore the regulation direction of the genes contributing to these enrichments. These additional visualizations suggested a predominance of positively regulated inflammatory and immune-related genes in Septic Shock.
+
+## Directional enrichment analysis of up and down regulated genes
+
+Although the integration of logFC values into gene–concept networks and pathway visualizations allowed an exploratory assessment of the regulation direction of genes contributing to enriched pathways, the biological question remained focused on which pathways were associated with the overall comparison between Septic Shock and SIRS.
+
+To more directly investigate pathway enrichment in relation to transcriptional direction, we next performed ORA separately on the DEG subsets previously identified as upregulated in Septic Shock and upregulated in SIRS according to the sign of their logFC values. This changed the biological question from: *“Which pathways are enriched among all DEGs?”* to *“Which pathways are preferentially enriched among genes upregulated in Septic Shock, and which among genes upregulated in SIRS?”*
+
+```{r}
+cat("Number of genes upregulated in SIRS:",
+    nrow(up_sirs),
+    "(", round(nrow(up_sirs) / total_degs * 100, 1), "% )\n")
+
+cat("Number of genes upregulated in Septic Shock:",
+    nrow(up_septic),
+    "(", round(nrow(up_septic) / total_degs * 100, 1), "% )\n")
+```
+
+As already seen in the differential expression analyses section, only 37 genes were found to be upregulated in SIRS, whereas most differentially expressed genes showed higher expression in Septic Shock samples, suggesting a stronger transcriptional activation associated with septic inflammatory response.
+
+The resulting directional gene lists were subsequently used to perform separate KEGG enrichment analyses:
+
+```{r}
+up_sirs_genes <- rownames(up_sirs)
+up_septic_genes <- rownames(up_septic)
+
+up_sirs_genes <- sub("\\..*$", "", up_sirs_genes)
+up_septic_genes <- sub("\\..*$", "", up_septic_genes)
+
+up_sirs_entrez <- mapIds(org.Hs.eg.db,
+                         keys = up_sirs_genes,
+                         column = "ENTREZID",
+                         keytype = "ENSEMBL",
+                         )
+
+up_septic_entrez <- mapIds(org.Hs.eg.db,
+                           keys = up_septic_genes,
+                           column = "ENTREZID",
+                           keytype = "ENSEMBL",
+                           )
+
+up_sirs_entrez <- unique(na.omit(as.character(up_sirs_entrez)))
+up_septic_entrez <- unique(na.omit(as.character(up_septic_entrez)))
+```
+
+```{r}
+kk_sirs <- enrichKEGG(
+  gene = up_sirs_entrez,
+  universe = universo.entrez,
+  organism = "hsa",
+  keyType = "ncbi-geneid",
+  pvalueCutoff = 0.05,
+  pAdjustMethod = "BH"
+)
+
+kk_septic <- enrichKEGG(
+  gene = up_septic_entrez,
+  universe = universo.entrez,
+  organism = "hsa",
+  keyType = "ncbi-geneid",
+  pvalueCutoff = 0.05,
+  pAdjustMethod = "BH"
+)
+
+cat("Number of significantly enriched KEGG pathways among genes upregulated in SIRS:",
+    dim(kk_sirs)[1], "\n")
+
+cat("Number of significantly enriched KEGG pathways among genes upregulated in Septic Shock:",
+    dim(kk_septic)[1], "\n")
+```
+
+Directional KEGG enrichment analysis revealed no significantly enriched pathways among genes upregulated in SIRS, whereas 16 significantly enriched pathways were identified among genes upregulated in Septic Shock.
+
+```{r directional-kegg-plot, message=FALSE, warning=FALSE, fig.cap="**Figure 29.** KEGG pathways enriched among genes upregulated in Septic Shock.", fig.width=8, fig.height=5}
+p_directional <- dotplot(kk_septic, showCategory = 15) +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(size = 8),
+    plot.title = element_blank()
+  )
+
+p_directional
+```
+
+Interestingly, these results were highly similar to those obtained in the global KEGG enrichment analysis, indicating that the overall functional signal was mainly driven by genes upregulated in Septic Shock rather than by genes upregulated in SIRS. In particular, immune-inflammatory pathways and host-defense processes remained the dominant functional categories.
+
+Together, these findings suggest that the transcriptional differences between the two conditions are primarily associated with immune-inflammatory and host-defense processes activated in Septic Shock samples.
+
+In conclusion to this section, we also explored Gene Set Enrichment Analysis (GSEA) to obtain a pathway-level directional interpretation. However, no KEGG pathways remained significantly enriched after multiple testing correction (adjusted p-value \< 0.05). Therefore, GSEA results were not further interpreted.
+
+# Functional Comparison between edgeR and limma-voom
+
+To further validate the robustness of the differential expression and enrichment results we obtained with edgeR, we perfomed an additional analysis using the limma-voom pipeline. The aim of this comparison is not to provide an alternative biological interpretation, but to assess the consistency of the transcriptional and pathway signals identified by two different statistical frameworks.
+
+## Differential Expression Analysis with limma-voom
+
+Limma-voom was implemented using the Bioconductor packages *limma* and *edgeR*. Limma is a widely used Bioconductor package originally developed for microarray data and later extended to RNA-seq analysis through the voom transformation method.
+
+RNA-seq count data show a strong dependance between the mean expression level and the variance, with lowly expressed genes generally having higher variability. The *voom* models this mean-variance relationship using log-transformed count data and computes precision weights for each observation that allow RNA-seq data to be analyzed using the linear modeling approaches.
+
+Similarly to the edgeR workflow, raw counts were first normalized using the TMM (Trimmed Mean of M-values) normalization method; then the voom transformation was applied in order to stabilize the variance across expression levels before fitting the linear model and performing empirical Bayes moderation which improves variance estimation by sharing information across genes.
+
+Genes with an adjusted p-value lower than 0.05 were considered significantly differentially expressed.
+
+```{r voom-mean-variance-plot, fig.cap="**Figure 30.** Mean-variance relationship estimated by the voom transformation.", fig.width=7, fig.height=5}
+data_sel$outcome <- as.factor(data_sel$outcome)
+
+dge_limma <- DGEList(counts = assay(data_sel))
+dge_limma <- calcNormFactors(dge_limma, method = "TMM")
+
+design_limma <- model.matrix(~ outcome, data = colData(data_sel))
+
+#apply the transformation and estimate precision weights
+v <- voom(dge_limma, design_limma, plot = TRUE)
+```
+
+The voom mean-variance plot shows the expected relationship between expression level and variance, supporting the use of precision weights for linear modeling of RNA-seq data.
+
+```{r}
+fit_limma <- lmFit(v, design_limma)
+
+#apply empirical Bayes moderation
+fit_limma <- eBayes(fit_limma)
+
+limma_res <- topTable(fit_limma, coef = 2, number = Inf)
+limma_degs <- limma_res[limma_res$adj.P.Val < 0.05, ]
+
+edgeR_genes <- rownames(differentially_expressed)
+limma_genes <- rownames(limma_degs)
+
+cat("Number of differentially expressed genes identified with limma-voom:",
+    length(limma_genes), "\n")
+
+cat("Number of genes shared between edgeR and limma-voom:",
+    length(intersect(edgeR_genes, limma_genes)), "\n")
+```
+
+The limma-voom workflow identified 340 differentially expressed genes in the comparison between Septic Shock and SIRS, with 197 genes shared between the limma-voom and edgeR analyses.
+
+```{r}
+limma_up_septic_shock <- limma_degs[limma_degs$logFC > 0, ]
+limma_up_sirs <- limma_degs[limma_degs$logFC < 0, ]
+
+total_limma_degs <- nrow(limma_up_sirs) + nrow(limma_up_septic_shock)
+
+cat("Number of genes upregulated in SIRS with limma-voom:",
+    nrow(limma_up_sirs),
+    "(", round(nrow(limma_up_sirs) / total_limma_degs * 100, 1), "% )\n")
+
+cat("Number of genes upregulated in Septic Shock with limma-voom:",
+    nrow(limma_up_septic_shock),
+    "(", round(nrow(limma_up_septic_shock) / total_limma_degs * 100, 1), "% )\n")
+```
+
+Although both methods identified a larger number of genes upregulated in Septic Shock than in SIRS, the magnitude of this imbalance differed between the two approaches: edgeR showed a stronger asymmetry, with 93.1% of DEGs upregulated in Septic Shock, whereas limma-voom produced a more balanced distribution of directional DEGs, with 66.8% of genes upregulated in Septic Shock.
+
+## Comparative directional KEGG enrichment analysis
+
+To further validate the robustness of the functional enrichment results obtained with edgeR, KEGG ORA was also performed using the limma-voom DEG list. The resulting KEGG enrichment profiles obtained from edgeR and limma-voom were then compared in order to evaluate the consistency of the functional interpretation across the two methods.
+
+```{r}
+limma_genes <- sub("\\..*$", "", rownames(limma_degs))
+
+limma_entrez <- mapIds(
+  org.Hs.eg.db,
+  keys = limma_genes,
+  column = "ENTREZID",
+  keytype = "ENSEMBL",
+  multiVals = "first"
+)
+
+limma_entrez <- unique(na.omit(as.character(limma_entrez)))
+```
+
+```{r}
+kk_limma <- enrichKEGG(
+  gene = limma_entrez,
+  universe = universo.entrez,
+  organism = "hsa",
+  keyType = "ncbi-geneid",
+  pvalueCutoff = 0.05,
+  pAdjustMethod = "BH"
+)
+
+cat("Number of KEGG pathways enriched among limma-voom DEGs:",
+    dim(kk_limma)[1], "\n")
+```
+
+The global KEGG ORA performed on the limma-voom DEG list identified 17 significantly enriched pathways.
+
+```{r limma-kegg-enrichment-table, message=FALSE, warning=FALSE, results='asis'}
+kk_limma_table <- as.data.frame(kk_limma) %>%
+  dplyr::select(ID, Description, GeneRatio, BgRatio, Count, p.adjust) %>%
+  dplyr::arrange(p.adjust)
+
+kk_limma_table %>%
+  kable(
+    format = "html",
+    caption = "limma-voom KEGG enrichment results",
+    digits = 3,
+    col.names = c("KEGG ID", "Pathway", "Gene ratio", "Background ratio", "Gene count", "Adjusted p-value")
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = TRUE,
+    position = "left",
+    font_size = 12
+  ) %>%
+  row_spec(0, bold = TRUE, color = "white", background = "#6B8F71")
+```
+
+Then, we visualized the KEGG pathways shared between the global ORA results obtained from edgeR and limma-voom DEGs using a comparative dotplot, in order to assess the consistency of the functional enrichment profiles across the two differential expression methods.
+
+```{r global-kegg-comparison-plot, message=FALSE, warning=FALSE, fig.cap="**Figure 31.** Shared KEGG pathways identified by edgeR and limma-voom global ORA.", fig.width=14, fig.height=6.5}
+edgeR_kegg_df <- as.data.frame(kk) %>%
+  mutate(method = "edgeR")
+
+limma_kegg_df <- as.data.frame(kk_limma) %>%
+  mutate(method = "limma-voom")
+
+common_kegg <- intersect(edgeR_kegg_df$Description,
+                         limma_kegg_df$Description)
+
+kegg_comp <- bind_rows(edgeR_kegg_df, limma_kegg_df) %>%
+  filter(Description %in% common_kegg) %>%
+  mutate(log_padj = -log10(p.adjust))
+
+p_kegg_comp <- ggplot(kegg_comp,
+                      aes(x = method,
+                          y = reorder(Description, log_padj),
+                          size = Count,
+                          color = log_padj)) +
+  geom_point(alpha = 0.85) +
+  labs(
+    title = NULL,
+    x = NULL,
+    y = NULL,
+    size = "Gene count",
+    color = "-log10 adjusted p-value"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(size = 8),
+    plot.title = element_text(face = "bold")
+  )
+
+p_kegg_comp
+```
+
+Figure 31 shows that multiple KEGG pathways associated with immune response, inflammation and host-defense mechanisms were consistently enriched by both edgeR and limma-voom ORA analyses. In particular, pathways related to TNF signaling, Th17 cell differentiation, neutrophil extracellular trap formation, and multiple infection-associated pathways such as Tuberculosis, Shigellosis, and Legionellosis were shared between the two methods.
+
+Although edgeR and limma-voom identified different numbers of DEGs, the strong overlap between the enriched pathways supports the robustness of the main functional signal identified in this study, indicating again that the transcriptional differences between Septic Shock and SIRS are predominantly associated with immune-inflammatory and host-defense processes.
+
+# Discussion
+
+In this report, we investigated transcriptomic differences between Septic Shock and SIRS samples in order to characterize the molecular mechanisms associated with severe infectious and non-infectious systemic inflammatory responses.
+
+First our exploratory analyses, highlighting highly skewed count distributions, intensity-dependent variability and GC-content bias, justified the application of normalization procedures before downstream analyses. We tested different normalization approaches and chose the TMM normalization, which provided the most balanced performance reducing technical variability while preserving biological differences between experimental groups.
+
+Initially we performed the differential expression analyses of Septic Schock and SIRS using edgeR, but the model detected only a limited number of DEGs and showed a non-uniform raw p-value distribution, suggesting the presence of unwanted sources of variability. In order to improve model fitting, we applied the RUV correction method, which allowed us to identify 537 differentially expressed genes. Clustering analysis supported the presence of transcriptomic differences between Septic Shock and SIRS samples: the heatmap showed a partial separation between the two groups, while silhouette analysis highlighted differences in cluster homogeneity between the two conditions.
+
+Functional enrichment analyses consistently highlighted pathways associated with immune response, inflammatory signaling and host-pathogen interaction:
+
+-   KEGG enrichment identified pathways such as TNF signaling, Th17 cell differentiation, Salmonella infection and Tuberculosis,
+
+-   Reactome analysis emphasized neutrophil degranulation, interleukin signaling and Fc receptor-related processes
+
+-   Gene Ontology analyses further confirmed the enrichment of biological processes associated with inflammatory response, leukocyte activation and immune regulation.
+
+Directional analyses then showed that most differentially expressed genes were upregulated in Septic Shock samples, suggesting stronger transcriptional activation associated with severe infectious inflammation.
+
+A comparison between edgeR and limma analyses showed partially overlapping but not identical sets of differentially expressed genes, reflecting methodological differences between the two statistical approaches. Nevertheless, functional enrichment analyses performed with both methods consistently highlighted immune-inflammatory and host-defense pathways, supporting the robustness of the main biological signals associated with Septic Shock.
+
+## Biological interpretation
+
+Although both Septic Shock and SIRS are characterized by systemic inflammatory responses, our analyses highlighted important molecular differences between infectious and non-infectious inflammation. In particular, Septic Shock samples showed stronger enrichment of pathways associated with cytokine signaling, neutrophil activation, interleukin-mediated responses and host-pathogen interaction, suggesting the presence of transcriptional programs specifically associated with severe infection-induced inflammation. Clustering analyses also revealed greater heterogeneity among Septic Shock samples compared with SIRS, suggesting that Septic Shock is characterized by a more variable and complex molecular response, potentially reflecting differences in host immune activation, disease severity and pathogen-host interactions between patients.
+
+Overall, these results suggest that, despite sharing common inflammatory features, Septic Shock and SIRS are characterized by distinct transcriptional and functional profiles that may contribute to a better characterization of infectious and non-infectious systemic inflammatory conditions, potentially supporting clinical distinction between Septic Shock and SIRS.
+
+## Comparison with the original study
+
+Our findings are consistent with those reported in the original CAPSOD study by Tsalik et al. However there are some differences in the downstream analytical design to point out.
+
+While the original study compared SIRS subjects, sepsis survivors (composed by uncomplicated sepsis, sever sepsis and septic shock patients) and sepsis non-survivors, our analysis specifically focused on the comparison between SIRS and Septic Shock patients. However, the authors highlighted a substantial overlap among sepsis-related inflammatory conditions as sepsis, severe sepsis and septic shock survivors showed highly similar transcriptional profiles.
+
+The result of the enrichment analyses are very similar to ours as the oringinal paper identified pathways related to immune response, defense response, cytokine signaling and innate immunity as major transcriptional signatures distinguishing sepsis from SIRS. Similarly, our GO, KEGG and Reactome analyses showed that many up-regulated genes were associated with inflammatory and immune-related pathways.
+
+In addition, our exploratory analyses also reflected the substantial biological heterogeneity of sepsis described in the original study. In particular, PCA did not show a clear separation between SIRS and Septic Shock samples, indicating that the clinical classification alone does not fully describe the underlying transcriptomic variability.
