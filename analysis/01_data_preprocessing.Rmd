@@ -1,0 +1,64 @@
+---
+title: "Comparative transcriptomic analysis of SIRS and Septic shock"
+author: "Bellandi Luisa, Tommaso Saccon"
+date: "2026-04-10"
+output: html_document
+---
+
+# Data preprocessing
+
+First, we imported raw data:
+
+```{r}
+data <- readRDS("data/SRP050000.rds")
+cat("The dataset contains",  nrow(data), "genes and",  ncol(data), "samples.")
+```
+
+The imported object is a large RangedSummarizedExperiment containing 63.856 genes and 129 patient samples.
+
+Clinical information was extracted from the sample metadata in order to identify the clinical outcome associated with each patient.
+
+```{r}
+att <- colData(data)$sra.sample_attributes
+outcome <- sub(".*sirs outcomes;;([^|]+).*", "\\1", att)
+colData(data)$outcome <- outcome
+```
+
+The outcome variable includes the five original clinical groups described in the study.
+
+```{r outcome-table, message=FALSE, warning=FALSE, results='asis'}
+tab_outcome <- table(colData(data)$outcome)
+
+outcome_table <- as.data.frame(tab_outcome)
+colnames(outcome_table) <- c("Outcome", "Samples")
+
+outcome_table %>%
+  knitr::kable(
+    format = "html",
+    caption = "Clinical outcome groups",
+    align = c("l", "c"),
+    col.names = c("Outcome", "Number of samples")
+  ) %>%
+  kableExtra::kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE,
+    position = "center",
+    font_size = 12
+  ) %>%
+  kableExtra::row_spec(0, bold = TRUE, color = "white", background = "#6B8F71")
+```
+
+Since the aim of this report is to compare transcriptomic profiles between Septic shock and SIRS patients, we selected only samples belonging to these two groups for downstream analyses. The resulting dataset contained 33 Septic shock samples and 23 SIRS samples, for a total of 56 patient samples.
+
+```{r}
+data_sel <- data[, data$outcome %in% c('Septic shock', 'SIRS')]
+```
+
+Then we filtered genes characterized by low expression.
+
+```{r}
+data_sel <- data_sel[rowSums(assay(data_sel)) >= 10, ]
+cat("Now data_sel contains:", nrow(data_sel), "genes and", ncol(data_sel), "samples.")
+```
+
+This way, we reduced the dimension of the dataset to 45552 genes and 56 samples.

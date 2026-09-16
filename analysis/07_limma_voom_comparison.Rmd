@@ -1,0 +1,168 @@
+---
+title: "Comparative transcriptomic analysis of SIRS and Septic shock"
+author: "Bellandi Luisa, Tommaso Saccon"
+date: "2026-04-10"
+output: html_document
+---
+# Functional Comparison between edgeR and limma-voom
+
+To further validate the robustness of the differential expression and enrichment results we obtained with edgeR, we perfomed an additional analysis using the limma-voom pipeline. The aim of this comparison is not to provide an alternative biological interpretation, but to assess the consistency of the transcriptional and pathway signals identified by two different statistical frameworks.
+
+## Differential Expression Analysis with limma-voom
+
+Limma-voom was implemented using the Bioconductor packages *limma* and *edgeR*. Limma is a widely used Bioconductor package originally developed for microarray data and later extended to RNA-seq analysis through the voom transformation method.
+
+RNA-seq count data show a strong dependance between the mean expression level and the variance, with lowly expressed genes generally having higher variability. The *voom* models this mean-variance relationship using log-transformed count data and computes precision weights for each observation that allow RNA-seq data to be analyzed using the linear modeling approaches.
+
+Similarly to the edgeR workflow, raw counts were first normalized using the TMM (Trimmed Mean of M-values) normalization method; then the voom transformation was applied in order to stabilize the variance across expression levels before fitting the linear model and performing empirical Bayes moderation which improves variance estimation by sharing information across genes.
+
+Genes with an adjusted p-value lower than 0.05 were considered significantly differentially expressed.
+
+```{r voom-mean-variance-plot, fig.cap="**Figure 30.** Mean-variance relationship estimated by the voom transformation.", fig.width=7, fig.height=5}
+data_sel$outcome <- as.factor(data_sel$outcome)
+
+dge_limma <- DGEList(counts = assay(data_sel))
+dge_limma <- calcNormFactors(dge_limma, method = "TMM")
+
+design_limma <- model.matrix(~ outcome, data = colData(data_sel))
+
+#apply the transformation and estimate precision weights
+v <- voom(dge_limma, design_limma, plot = TRUE)
+```
+
+The voom mean-variance plot shows the expected relationship between expression level and variance, supporting the use of precision weights for linear modeling of RNA-seq data.
+
+```{r}
+fit_limma <- lmFit(v, design_limma)
+
+#apply empirical Bayes moderation
+fit_limma <- eBayes(fit_limma)
+
+limma_res <- topTable(fit_limma, coef = 2, number = Inf)
+limma_degs <- limma_res[limma_res$adj.P.Val < 0.05, ]
+
+edgeR_genes <- rownames(differentially_expressed)
+limma_genes <- rownames(limma_degs)
+
+cat("Number of differentially expressed genes identified with limma-voom:",
+    length(limma_genes), "\n")
+
+cat("Number of genes shared between edgeR and limma-voom:",
+    length(intersect(edgeR_genes, limma_genes)), "\n")
+```
+
+The limma-voom workflow identified 340 differentially expressed genes in the comparison between Septic Shock and SIRS, with 197 genes shared between the limma-voom and edgeR analyses.
+
+```{r}
+limma_up_septic_shock <- limma_degs[limma_degs$logFC > 0, ]
+limma_up_sirs <- limma_degs[limma_degs$logFC < 0, ]
+
+total_limma_degs <- nrow(limma_up_sirs) + nrow(limma_up_septic_shock)
+
+cat("Number of genes upregulated in SIRS with limma-voom:",
+    nrow(limma_up_sirs),
+    "(", round(nrow(limma_up_sirs) / total_limma_degs * 100, 1), "% )\n")
+
+cat("Number of genes upregulated in Septic Shock with limma-voom:",
+    nrow(limma_up_septic_shock),
+    "(", round(nrow(limma_up_septic_shock) / total_limma_degs * 100, 1), "% )\n")
+```
+
+Although both methods identified a larger number of genes upregulated in Septic Shock than in SIRS, the magnitude of this imbalance differed between the two approaches: edgeR showed a stronger asymmetry, with 93.1% of DEGs upregulated in Septic Shock, whereas limma-voom produced a more balanced distribution of directional DEGs, with 66.8% of genes upregulated in Septic Shock.
+
+## Comparative directional KEGG enrichment analysis
+
+To further validate the robustness of the functional enrichment results obtained with edgeR, KEGG ORA was also performed using the limma-voom DEG list. The resulting KEGG enrichment profiles obtained from edgeR and limma-voom were then compared in order to evaluate the consistency of the functional interpretation across the two methods.
+
+```{r}
+limma_genes <- sub("\\..*$", "", rownames(limma_degs))
+
+limma_entrez <- mapIds(
+  org.Hs.eg.db,
+  keys = limma_genes,
+  column = "ENTREZID",
+  keytype = "ENSEMBL",
+  multiVals = "first"
+)
+
+limma_entrez <- unique(na.omit(as.character(limma_entrez)))
+```
+
+```{r}
+kk_limma <- enrichKEGG(
+  gene = limma_entrez,
+  universe = universo.entrez,
+  organism = "hsa",
+  keyType = "ncbi-geneid",
+  pvalueCutoff = 0.05,
+  pAdjustMethod = "BH"
+)
+
+cat("Number of KEGG pathways enriched among limma-voom DEGs:",
+    dim(kk_limma)[1], "\n")
+```
+
+The global KEGG ORA performed on the limma-voom DEG list identified 17 significantly enriched pathways.
+
+```{r limma-kegg-enrichment-table, message=FALSE, warning=FALSE, results='asis'}
+kk_limma_table <- as.data.frame(kk_limma) %>%
+  dplyr::select(ID, Description, GeneRatio, BgRatio, Count, p.adjust) %>%
+  dplyr::arrange(p.adjust)
+
+kk_limma_table %>%
+  kable(
+    format = "html",
+    caption = "limma-voom KEGG enrichment results",
+    digits = 3,
+    col.names = c("KEGG ID", "Pathway", "Gene ratio", "Background ratio", "Gene count", "Adjusted p-value")
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = TRUE,
+    position = "left",
+    font_size = 12
+  ) %>%
+  row_spec(0, bold = TRUE, color = "white", background = "#6B8F71")
+```
+
+Then, we visualized the KEGG pathways shared between the global ORA results obtained from edgeR and limma-voom DEGs using a comparative dotplot, in order to assess the consistency of the functional enrichment profiles across the two differential expression methods.
+
+```{r global-kegg-comparison-plot, message=FALSE, warning=FALSE, fig.cap="**Figure 31.** Shared KEGG pathways identified by edgeR and limma-voom global ORA.", fig.width=14, fig.height=6.5}
+edgeR_kegg_df <- as.data.frame(kk) %>%
+  mutate(method = "edgeR")
+
+limma_kegg_df <- as.data.frame(kk_limma) %>%
+  mutate(method = "limma-voom")
+
+common_kegg <- intersect(edgeR_kegg_df$Description,
+                         limma_kegg_df$Description)
+
+kegg_comp <- bind_rows(edgeR_kegg_df, limma_kegg_df) %>%
+  filter(Description %in% common_kegg) %>%
+  mutate(log_padj = -log10(p.adjust))
+
+p_kegg_comp <- ggplot(kegg_comp,
+                      aes(x = method,
+                          y = reorder(Description, log_padj),
+                          size = Count,
+                          color = log_padj)) +
+  geom_point(alpha = 0.85) +
+  labs(
+    title = NULL,
+    x = NULL,
+    y = NULL,
+    size = "Gene count",
+    color = "-log10 adjusted p-value"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(size = 8),
+    plot.title = element_text(face = "bold")
+  )
+
+p_kegg_comp
+```
+
+Figure 31 shows that multiple KEGG pathways associated with immune response, inflammation and host-defense mechanisms were consistently enriched by both edgeR and limma-voom ORA analyses. In particular, pathways related to TNF signaling, Th17 cell differentiation, neutrophil extracellular trap formation, and multiple infection-associated pathways such as Tuberculosis, Shigellosis, and Legionellosis were shared between the two methods.
+
+Although edgeR and limma-voom identified different numbers of DEGs, the strong overlap between the enriched pathways supports the robustness of the main functional signal identified in this study, indicating again that the transcriptional differences between Septic Shock and SIRS are predominantly associated with immune-inflammatory and host-defense processes.

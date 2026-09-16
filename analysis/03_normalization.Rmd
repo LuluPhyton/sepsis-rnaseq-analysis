@@ -1,0 +1,233 @@
+---
+title: "Comparative transcriptomic analysis of SIRS and Septic shock"
+author: "Bellandi Luisa, Tommaso Saccon"
+date: "2026-04-10"
+output: html_document
+---
+# Normalization
+
+Normalization is required to eliminate systematic technical biases. It is a critical step as it ensures that differences in sequencing read counts reflect true biological variation.
+
+## Within Sample Normalization
+
+First, we applied sample normalization to correct for biological and technical biases specific to genomic features within a single biological sample, in particular gene length and GC-Content bias.
+
+To reduce GC content bias, we implemented the upper quartile normalization method in which, considering the expression counts of all genes of one sample, the third quartile is computed (not the median, which is often very close to zero in RNA-seq experiments). Then, all counts are divided by the third quartile value and then multiplied by $10^6$.
+
+```{r gc-bias-before-after, fig.cap="**Figure 10.** GC bias before and after within-sample normalization.", fig.width=10, fig.height=5}
+
+par(mfrow = c(1, 2))
+
+biasPlot(set, "gc", ylim = c(0, 10), log = TRUE, legend = FALSE, main = "Before normalization")
+
+wt <- withinLaneNormalization(set, "gc" , which = "upper", offset = TRUE)
+
+biasPlot(wt,"gc", ylim = c(0, 10),log = TRUE, legend = FALSE, main = "After normalization")
+
+par(mfrow = c(1, 1))
+```
+
+The performance of the upper quartile within sample normalization can be assessed by looking at the GC bias plot in Figure 10. The right panel (after normalization) shows much more consistent trends across samples, with the curves that have effectively converged into a unified band.
+
+We saved the results of this normalization in a large matrix object in order to apply it later to the data we will be analyzing.
+
+```{r}
+offset_gc <- offst(wt)
+```
+
+## Between Sample Normalization
+
+Between sample normalization is designed to eliminate technical variability across different sequencing libraries or independent samples and t is used to eliminate and correct differences in terms of sequencing depth.
+
+We implemented different between sample normalization methods in order to see which one worked better on this data. We used the following normalization techniques:
+
+-   **CPM (Count Per Million)**: gene counts of each sample are divided by the total number of mapped reads in the same sample and then multiplied by $10^6$.
+
+-   **Upper Quartile**: it works like the CPM but the division factor is the third quartile of the i-th sample.
+
+-   **TMM (Trimmed Mean of M-values)**: the scaling factor is computed after excluding genes with extreme expression values;
+
+-   **RLE (Relative log Expression)**: normalization based on sample-specific scaling factors computed from gene expression ratios relative to a reference across all samples.
+
+-   **Full Quantile**: normalization method that forces all samples to share the same statistical distribution by replacing counts with common ranked values across samples.
+
+```{r}
+# Full quantile normalization
+set_full <- betweenLaneNormalization(wt, which = "full", offset = TRUE)
+full <- set_full@assayData$normalizedCounts
+
+raw_count <- counts(wt)
+
+# RLE normalization
+lbs <- calcNormFactors(raw_count, method = "RLE")
+rle <- cpm(raw_count, lib.size = lbs * colSums(raw_count))
+
+# TMM normalization
+lbs <- calcNormFactors(raw_count, method = "TMM")
+tmm <- cpm(raw_count, lib.size = lbs * colSums(raw_count))
+
+# Upper quartile normalization
+lbs <- calcNormFactors(raw_count, method = "upperquartile")
+uq <- cpm(raw_count, lib.size = lbs * colSums(raw_count))
+
+tc <- cpm(raw_count)
+```
+
+We then assessed the performance of each normalization using boxplots and RLE plots.
+
+### Boxplots of normalized counts
+
+Boxplots of normalized gene counts should have a similar distribution and very close values of medians. The distributions of counts for each samples before normalization can be observed in the first boxplot.
+
+```{r normalization-boxplots, fig.cap="**Figure 11.**Comparison of expression distributions across between-sample normalization methods.", fig.width=10, fig.height=9}
+cols <- ifelse(colData(data_sel)$outcome == "SIRS", "hotpink", "aquamarine")
+
+par(mfrow = c(3, 2), mar = c(3, 4, 3, 1))
+
+boxplot(log2(raw_count + 1), outline = FALSE, las = 2,
+        ylab = "log(count+1)", main = "Before normalization",
+        xaxt = "n", col = cols, border = "#1b4d3e")
+legend("topright",
+       legend = c("SIRS", "Septic shock"),
+       fill = c("hotpink", "aquamarine"),
+       bty = "n",
+       cex = 0.8)
+
+boxplot(log2(tc + 1), outline = FALSE, las = 2,
+        ylab = "log(count+1)", main = "Boxplot CPM",
+        xaxt = "n", col = cols, border = "#1b4d3e")
+legend("topright",
+       legend = c("SIRS", "Septic shock"),
+       fill = c("hotpink", "aquamarine"),
+       bty = "n",
+       cex = 0.8)
+
+boxplot(log2(rle + 1), outline = FALSE, las = 2,
+        ylab = "log(count+1)", main = "Boxplot RLE",
+        xaxt = "n", col = cols, border = "#1b4d3e")
+legend("topright",
+       legend = c("SIRS", "Septic shock"),
+       fill = c("hotpink", "aquamarine"),
+       bty = "n",
+       cex = 0.8)
+
+boxplot(log2(tmm + 1), outline = FALSE, las = 2,
+        ylab = "log(count+1)", main = "Boxplot TMM",
+        xaxt = "n", col = cols, border = "#1b4d3e")
+legend("topright",
+       legend = c("SIRS", "Septic shock"),
+       fill = c("hotpink", "aquamarine"),
+       bty = "n",
+       cex = 0.8)
+
+boxplot(log2(uq + 1), outline = FALSE, las = 2,
+        ylab = "log(count+1)", main = "Boxplot Upper quartile",
+        xaxt = "n", col = cols, border = "#1b4d3e")
+legend("topright",
+       legend = c("SIRS", "Septic shock"),
+       fill = c("hotpink", "aquamarine"),
+       bty = "n",
+       cex = 0.8)
+
+boxplot(log2(full + 1), outline = FALSE, las = 2,
+        ylab = "log(count+1)", main = "Boxplot full",
+        xaxt = "n", col = cols, border = "#1b4d3e")
+
+legend("topright",
+       legend = c("SIRS", "Septic shock"),
+       fill = c("hotpink", "aquamarine"),
+       bty = "n",
+       cex = 0.8)
+
+par(mfrow = c(1, 1))
+```
+
+CPM normalization is not well suited for RNA-seq data and therefore its performance is not optimal and significant variability in terms of distribution can be appreciated in the boxplot.
+
+Overall, normalization methods which worked best were RLE and TMM. In both cases, all samples had similar median and the distributions were almost totally aligned.
+
+It is also important to point out that this kind of performance assessment cannot be used to evaluate full quantile and upper quartile normalization. In fact, these methods lead to perfectly equal statistical distributions and distributions perfectly aligned in terms of third quartile, respectively. Therefore, to assess the quality of normalization we must rely on RLE plots.
+
+### RLE plots of normalized counts
+
+RLE plots are diagnostic plots that help visualize the differences between distributions of read counts across samples. To obtain this plot, the log ratio of gene counts of each sample and the median of the gene count across all samples is computed. The distribution of samples should be centered around zero.
+
+```{r normalization-rle-plots, fig.cap="**Figure 12.** Comparison of RLE distributions across normalization methods.", fig.width=10, fig.height=9}
+col <- data_sel$outcome
+col$color <- ifelse(col == 'Septic shock', 'aquamarine', 'hotpink')
+
+par(mfrow = c(3, 2),mar = c(3, 4, 3, 1) )
+
+EDASeq::plotRLE(raw_count, outline = FALSE,  las=2, col=col$color,
+        ylab = "RLE", main = "RLE plot before normalization", xaxt='n')
+legend("topright", legend = c("SIRS", "Septic shock"),
+       fill = c("hotpink", "aquamarine"), bty = "n", cex = 0.7)
+
+EDASeq::plotRLE(tc, outline = FALSE,  las=2, col=col$color,
+        ylab = "RLE", main = "RLE plot CPM", xaxt='n')
+legend("topright", legend = c("SIRS", "Septic shock"),
+       fill = c("hotpink", "aquamarine"), bty = "n", cex = 0.7)
+
+EDASeq::plotRLE(tmm, outline = FALSE,  las=2, col=col$color,
+        ylab = "RLE", main = "RLE plot TMM", xaxt='n')
+legend("topright", legend = c("SIRS", "Septic shock"),
+       fill = c("hotpink", "aquamarine"), bty = "n", cex = 0.7)
+
+EDASeq::plotRLE(rle, outline = FALSE,  las=2, col=col$color,
+        ylab = "RLE", main = "RLE plot RLE", xaxt='n')
+legend("topright", legend = c("SIRS", "Septic shock"),
+       fill = c("hotpink", "aquamarine"), bty = "n", cex = 0.7)
+
+EDASeq::plotRLE(uq, outline = FALSE,  las=2, col=col$color,
+        ylab = "RLE", main = "RLE plot upper quartile", xaxt='n')
+legend("topright", legend = c("SIRS", "Septic shock"),
+       fill = c("hotpink", "aquamarine"), bty = "n", cex = 0.7)
+
+EDASeq::plotRLE(full, outline = FALSE,  las=2, col=col$color,
+        ylab = "RLE", main = "RLE plot full", xaxt='n')
+legend("topright", legend = c("SIRS", "Septic shock"),
+       fill = c("hotpink", "aquamarine"), bty = "n", cex = 0.7)
+
+
+par(mfrow = c(1, 1))
+```
+
+Before normalization, the RLE plot shows different distributions for different samples, where medians are not aligned on zero. The same condition can be observed for CPM normalization.
+
+Both RLE and TMM yield highly concordant results. As a matter of fact, both approaches successfully align sample medians to zero and lead to similar distributions across samples. In addition, distributions are tight around zero (values on y-axis are smaller than one in both cases).
+
+The upper quartile method leads to a slightly bigger variance in terms of distributions (this can be seen by the values of the y-axis). Similarly, the full quantile method leads to very high variance.
+
+Considering everything observed in boxplots and RLE plots, we decided to apply the **TMM** normalization in later analysis steps.
+
+### Sample correlation after normalization
+
+To assess the presence of outlier samples after normalization, we used a heatmap based on the Pearson correlation coefficient.
+
+```{r correlation-heatmap, fig.cap="**Figure 13.** Sample correlation heatmap.", fig.width=8, fig.height=6}
+colnames <- colnames(tmm)
+colnames(tmm) <- substr(colnames(tmm), 9, 12)
+cor_mat <- cor(log1p(tmm))
+
+corrplot(cor_mat, method = "color", order = 'hclust', tl.cex=0.2)
+```
+
+Overall, all samples are highly correlated. This indicates that within-sample and between-sample normalization worked properly.
+
+Interestingly, in the correlation plot a cross-shaped separation can be observed, indicating a drop in correlation between specific samples and the rest of the dataset. Since the intra-group correlation within the main blocks remains very high, this pattern confirms that the normalization did not erase the true biological differences between the two experimental conditions.
+
+## Normalization assessment through PCA
+
+To conclude this section, we used the PCA to evaluate the normalization performance.
+
+```{r pca-tmm-screeplot, fig.cap="**Figure 14.** PCA scree plot after TMM normalization.", fig.width=8, fig.height=5}
+pca2 <- prcomp(t(log1p(tmm)))
+screeplot(pca2, type = 'lines', col = '#1b4d3e', main = '')
+```
+
+```{r pca-tmm-plot, fig.cap="**Figure 15.** PCA plot after TMM normalization.", fig.width=8, fig.height=5}
+par(mfrow=c(1,1))
+EDASeq::plotPCA(tmm, k=3, labels=F, col=col$color, pch=20)
+```
+
+The PCA scree plot (Figure 14) reveals a relatively smooth descent in eigenvalues (the first three PCs cover roughly 45% of the variance). Nevertheless, the pairwise PC score plots (Figure 15) highlight the fact that the biological conditions (Septic Shock and SIRS) are not separated by PC1. Instead, PC2 offers the best visual separation between the two groups. In fact, the SIRS group (pink) samples tend to showcase higher PC2 values with respect to Septic Shock (turqouise).

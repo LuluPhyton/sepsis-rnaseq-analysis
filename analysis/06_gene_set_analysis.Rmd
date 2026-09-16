@@ -1,0 +1,359 @@
+---
+title: "Comparative transcriptomic analysis of SIRS and Septic shock"
+author: "Bellandi Luisa, Tommaso Saccon"
+date: "2026-04-10"
+output: html_document
+---
+# Gene set analysis
+
+## Gene set analysis with ORA Method
+
+We performed the gene set analysis through **Over-Representation Analysis (ORA)** using the *ClusterProfiler* package. ORA was applied to KEGG pathways, Reactome pathways, and Gene Ontology categories using the functions *enrichKEGG()*, *enrichPathway()*, and *enrichGO()*, respectively. All these functions implement the Fisher exact test to evaluate whether specific functional categories are over-represented among the differentially expressed genes compared to what we would except by chance, given the size of the universe.
+
+The formula of the Fisher exact test is the following: 
+$$
+P(X \geq k) =
+\sum_{i=k}^{\min(M,n)}
+\frac{\binom{M}{i}\binom{N-M}{n-i}}{\binom{N}{n}}
+$$
+
+where $N$ is the total number of genes in the universe, $M$ is the number of genes belonging to the functional category, $n$ is the number of differentially expressed genes, and $k$ is the number of overlapping genes between the category and the differentially expressed gene list.
+
+First, we defined the two gene sets required for ORA: the list of differentially expressed genes (DEGs) and the background universe, consisting of all genes tested in the differential expression analysis.
+
+```{r message=FALSE}
+deg <- differentially_expressed
+
+tab <- topTags(res_final, n = Inf)$table
+universo <- row.names(tab)
+sign <- row.names(deg)
+
+universo <- sub("\\..*$", "", universo) #annotation
+sign <- sub("\\..*$", "", sign)
+
+universo.entrez <- mapIds(org.Hs.eg.db, 
+                    keys = universo, 
+                    column = "ENTREZID",
+                    keytype = "ENSEMBL")  
+
+sign.entrez <- mapIds(org.Hs.eg.db,
+                    keys = sign, 
+                    column = "ENTREZID",
+                    keytype = "ENSEMBL")
+
+universo.entrez <- as.character(universo.entrez)
+sign.entrez <- as.character(sign.entrez)
+
+geneList_entrez <- deg$logFC
+names(geneList_entrez) <- sign.entrez
+
+geneList_entrez <- geneList_entrez[!is.na(names(geneList_entrez))]
+geneList_entrez <- geneList_entrez[!duplicated(names(geneList_entrez))]
+
+
+cat("Number of significant DEGs mapped to Entrez IDs:",
+    length(sign.entrez), "\n")
+
+cat("Number of background genes mapped to Entrez IDs:",
+    length(universo.entrez), "\n")
+```
+
+The final DEG list contained 537 genes, while the background universe consisted of 23.331 genes.
+
+#### KEGG pathways
+
+Using the Entrez ID vectors created previously, we performed ORA on KEGG pathways with the *enrichKEGG()* that tested whether any KEGG pathway was significantly enriched among the DEGs using Fisher’s exact test. P-values were adjusted for multiple testing using the Benjamin-Hochberg method, and pathways with an adjusted p-value below 0.05 were considered significant.
+
+```{r, message=FALSE}
+kk <- enrichKEGG(gene = sign.entrez,
+                 universe = universo.entrez,
+                 organism = 'hsa',
+                 keyType = 'ncbi-geneid', 
+                 pvalueCutoff = 0.05, 
+                 pAdjustMethod = "BH") 
+cat("Number of significantly enriched KEGG pathways identified:",
+    dim(kk)[1], "\n")
+```
+
+```{r kegg-enrichment-table, message=FALSE, warning=FALSE, results='asis'}
+kk_table <- as.data.frame(kk) %>%
+  dplyr::select(ID, Description, GeneRatio, BgRatio, Count, p.adjust) %>%
+  dplyr::arrange(p.adjust)
+
+kk_table %>%
+  kable(
+    format = "html",
+    caption = "Enriched KEGG pathways identified by ORA",
+    digits = 3,
+    col.names = c("KEGG ID", "Pathway", "Gene ratio", "Background ratio", "Gene count", "Adjusted p-value")
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = TRUE,
+    position = "left",
+    font_size = 12
+  ) %>%
+  row_spec(0, bold = TRUE, color = "white", background = "#6B8F71")
+```
+
+The analysis returned 16 enriched KEGG pathways, which are listed in the table below and further visualized using a dotplot and a cnetplot.
+
+```{r kegg-enrichment-plots, message=FALSE, warning=FALSE, fig.cap="**Figure 25.** KEGG pathway enrichment analysis.", fig.width=14, fig.height=6.5}
+
+p1 <- dotplot(kk, showCategory = 17, font.size = 10) +
+  ggtitle("A. KEGG enrichment dotplot") +
+  theme(plot.margin = margin(10, 35, 10, 10))
+
+p2 <- cnetplot(kk, showCategory = 8, node_label = "category", foldChange=geneList_entrez) +
+  ggtitle("B. Shared genes across enriched pathways") + 
+  theme(plot.margin = margin(10, 10, 10, 35)) + scale_colour_gradient2(
+    low = "blue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    limits = c(-2, 2),
+    oob = scales::squish
+  ) 
+
+(p1 | p2) +
+  plot_layout(widths = c(1.15, 1)) &
+  theme(plot.margin = margin(10, 15, 10, 15))
+```
+
+**Figure 25.A** shows that several pathways related to immune response, inflammatory signaling, and host-pathogen interaction were significantly enriched among the DEGs, consistently with the biological context of sepsis and septic shock. In particular, *Shigellosis*, *Salmonella infection*, and *Tuberculosis* showed the highest GeneRatio values.
+
+On the other side, the gene-concept network in **Figure 25.B** shows that several KEGG categories share common genes, suggesting that the enrichment signal is not driven by completely independent pathways, but rather by groups of genes involved in interconnected biological processes. In particular *TNF signaling pathway*, *Th17 cell differentiation*, *Tuberculosis*, *Shigellosis*, and *Salmonella infection*, appeared strongly interconnected through shared DEGs. Gene nodes were additionally colored according to their logFC values, allowing visualization of the regulation direction of the DEGs contributing to each pathway. Most genes showed positive logFC values, suggesting that the enrichment signal was predominantly driven by genes upregulated in Septic Shock relative to SIRS.
+
+Although most genes contributing to the enriched inflammatory pathways showed positive logFC values, a smaller subset of genes appeared downregulated. To further investigate this aspect and given its relevant biological role in sepsis, the TNF signaling pathway was visualized using Pathview.
+
+```{r pathview-tnf-plot, message=FALSE, warning=FALSE, fig.cap="**Figure 26.** KEGG TNF signaling pathway visualization generated with pathview.", fig.width=8, fig.height=5}
+pathview(gene.data = geneList_entrez, pathway.id = "hsa04668", species = "hsa")
+knitr::include_graphics("hsa04668.pathview.png")
+```
+
+Pathview visualization shows that differentially expressed genes are mainly involved selected inflammatory and signaling modules. Upregulated genes included components of the NF-kB/MAPK branches, such as NF-kB, MKK3/6 and p38, together with downstream inflammatory and immune-related genes including IL1B, FAS, SOCS3, TNFAIP3, MMP9 and ICAM1. In contrast, only a limited number of genes, such as CCL5 and MSK1/2, appeared downregulated. This suggests that the enrichment of the TNF signaling pathway is driven by the selective modulation of specific inflammatory branches rather than by a uniform alteration of the whole pathway.
+
+### Reactome Pathways
+
+We repeated the same ORA approach using the **Reactome database** (with *enrichPathway()* function), to compare the KEGG results with an alternative pathway annotation database. The same significance threshold and multiple testing correction were applied, using an adjusted p-value cutoff of 0.05 and the Benjamini-Hochberg method.
+
+```{r message=FALSE}
+kk2 <- enrichPathway(gene = sign.entrez,
+                 universe = universo.entrez,
+                 organism = 'human',
+                 pvalueCutoff = 0.05,
+                 pAdjustMethod = "BH")
+
+cat("Number of significantly enriched Reactome pathways identified:",
+    dim(kk2)[1], "\n")
+```
+
+The analysis identified 10 significantly enriched Reactome pathways, which are listed in the table below and further visualized using a dotplot and a cnetplot.
+
+```{r reactome-enrichment-table, message=FALSE, warning=FALSE, results='asis'}
+reactome_table <- as.data.frame(kk2) %>%
+  dplyr::select(ID, Description, GeneRatio, BgRatio, Count, p.adjust) %>%
+  dplyr::arrange(p.adjust)
+
+reactome_table %>%
+  kable(
+    format = "html",
+    caption = "Enriched Reactome pathways identified by ORA",
+    digits = 3,
+    col.names = c("Reactome ID", "Pathway", "Gene ratio", "Background ratio", "Gene count", "Adjusted p-value")
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = TRUE,
+    position = "left",
+    font_size = 12
+  ) %>%
+  row_spec(0, bold = TRUE, color = "white", background = "#6B8F71")
+```
+
+```{r reactome-enrichment-plots, message=FALSE, warning=FALSE, fig.cap="**Figure 27.** Reactome pathway enrichment analysis.", fig.width=14, fig.height=6.5}
+
+p1 <- dotplot(kk2, showCategory = 15, font.size = 10) +
+  ggtitle("A. Reactome enrichment dotplot") +
+  theme(plot.margin = margin(10, 35, 10, 10))
+
+p2 <- cnetplot(
+  kk2,
+  showCategory = 8,
+  node_label = "category",
+  foldChange = geneList_entrez
+) +
+  ggtitle("B. Shared DEGs and their regulation direction") +
+  theme(plot.margin = margin(10, 10, 10, 35)) +
+  scale_colour_gradient2(
+    low = "blue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    limits = c(-2, 2),
+    oob = scales::squish
+  )
+
+(p1 | p2) +
+  plot_layout(widths = c(1.15, 1)) &
+  theme(plot.margin = margin(10, 15, 10, 15))
+```
+
+Figure 27.A shows that the most significantly enriched categories are mainly associated with innate immune response, inflammatory signaling, neutrophil activation, interleukin-mediated signaling, and Fc receptor-related processes. In particular, *Neutrophil degranulation* and *Signaling by Interleukins* showed the highest GeneRatio values and strongest enrichment significance. Additional enriched pathways included *FCGR activation* and *FCGR-dependent phagocytosis*.
+
+The gene-concept network in the Figure 27.B shows that several immune-related categories shared a substantial proportion of genes; in particular, pathways associated with neutrophil degranulation, interleukin signaling and FCGR activation appeared strongly interconnected through shared differentially expressed genes. Gene nodes were additionally colored according to their logFC values, showing that most shared DEGs displayed positive regulation in Septic Shock relative to SIRS, although a smaller subset of genes appeared downregulated.
+
+#### Gene Ontology categories
+
+We run the same analyses using GO terms using the Biological Process (BP) the Molecular function (MF) and the Cellular component (CC) categories:
+
+```{r}
+# GO Biological Process
+ego_bp <- enrichGO(gene = sign.entrez,
+                   universe = universo.entrez,
+                   OrgDb = org.Hs.eg.db,
+                   keyType = "ENTREZID",
+                   ont = "BP",
+                   pvalueCutoff = 0.05,
+                   pAdjustMethod = "BH",
+                   readable = TRUE)
+
+# GO Molecular Function
+ego_mf <- enrichGO(gene = sign.entrez,
+                   universe = universo.entrez,
+                   OrgDb = org.Hs.eg.db,
+                   keyType = "ENTREZID",
+                   ont = "MF",
+                   pvalueCutoff = 0.05,
+                   pAdjustMethod = "BH",
+                   readable = TRUE)
+
+# GO Cellular Component
+ego_cc <- enrichGO(gene = sign.entrez,
+                   universe = universo.entrez,
+                   OrgDb = org.Hs.eg.db,
+                   keyType = "ENTREZID",
+                   ont = "CC",
+                   pvalueCutoff = 0.05,
+                   pAdjustMethod = "BH",
+                   readable = TRUE)
+
+```
+
+```{r go-enrichment-plots, message=FALSE, warning=FALSE, fig.cap="**Figure 28.** Gene Ontology enrichment analysis.", fig.width=20, fig.height=6}
+
+p_bp <- dotplot(ego_bp, showCategory = 15, font.size = 8) +
+  ggtitle("A. Biological Process") +
+  theme(plot.margin = margin(10, 40, 10, 10))
+
+p_mf <- dotplot(ego_mf, showCategory = 15, font.size = 8) +
+  ggtitle("B. Molecular Function") +
+  theme(plot.margin = margin(10, 25, 10, 20))
+
+p_cc <- dotplot(ego_cc, showCategory = 15, font.size = 8) +
+  ggtitle("C. Cellular Component") +
+  theme(plot.margin = margin(10, 40, 10, 20))
+
+(p_bp | p_mf | p_cc) +
+  plot_layout(widths = c(1.35, 0.75, 1.35))
+```
+
+Figure 28 summarizes the GO enrichment analysis across the three main Gene Ontology categories: Biological Process (BP, figure 28.A), Molecular Function (MF, figure 28.B), and Cellular Component (CC, figure 28.C). BP terms mainly highlightes inflammatory and immune-related processes (including inflammatory response, leukocyte activation, and response to lipopolysaccharide), the MF category identified immune receptor activity as the main enriched molecular function while CC terms were mainly associated with secretory granules, vesicle lumen and membrane-associated immune compartments.
+
+Together KEGG, Reactome, and GO enrichment analyses converged on the same biological interpretation:
+
+1.  KEGG enrichment highlighted pathways related to immune response, inflammatory signaling, and host-pathogen interaction;
+
+2.  Reactome provided a more process-oriented and mechanistic representation of these signals, emphasizing neutrophil degranulation, interleukin signaling, Fc gamma receptor activation, and phagocytosis;
+
+3.  GO enrichment further supported these findings by identifying inflammatory response, immune regulation, leukocyte activation, and response to lipopolysaccharide among the most significantly enriched Biological Process terms.
+
+From this analysis section we can conclude that the enrichment analyses consistently indicated a strong immune-inflammatory component underlying the transcriptional differences between Septic Shock and SIRS. Since ORA was performed on the complete set of DEGs, the enriched pathways mainly represent biological processes associated with the overall comparison between the two conditions rather than formal pathway-level activation scores. However, by integrating logFC information into gene–concept networks and pathway visualizations, it was possible to explore the regulation direction of the genes contributing to these enrichments. These additional visualizations suggested a predominance of positively regulated inflammatory and immune-related genes in Septic Shock.
+
+## Directional enrichment analysis of up and down regulated genes
+
+Although the integration of logFC values into gene–concept networks and pathway visualizations allowed an exploratory assessment of the regulation direction of genes contributing to enriched pathways, the biological question remained focused on which pathways were associated with the overall comparison between Septic Shock and SIRS.
+
+To more directly investigate pathway enrichment in relation to transcriptional direction, we next performed ORA separately on the DEG subsets previously identified as upregulated in Septic Shock and upregulated in SIRS according to the sign of their logFC values. This changed the biological question from: *“Which pathways are enriched among all DEGs?”* to *“Which pathways are preferentially enriched among genes upregulated in Septic Shock, and which among genes upregulated in SIRS?”*
+
+```{r}
+cat("Number of genes upregulated in SIRS:",
+    nrow(up_sirs),
+    "(", round(nrow(up_sirs) / total_degs * 100, 1), "% )\n")
+
+cat("Number of genes upregulated in Septic Shock:",
+    nrow(up_septic),
+    "(", round(nrow(up_septic) / total_degs * 100, 1), "% )\n")
+```
+
+As already seen in the differential expression analyses section, only 37 genes were found to be upregulated in SIRS, whereas most differentially expressed genes showed higher expression in Septic Shock samples, suggesting a stronger transcriptional activation associated with septic inflammatory response.
+
+The resulting directional gene lists were subsequently used to perform separate KEGG enrichment analyses:
+
+```{r}
+up_sirs_genes <- rownames(up_sirs)
+up_septic_genes <- rownames(up_septic)
+
+up_sirs_genes <- sub("\\..*$", "", up_sirs_genes)
+up_septic_genes <- sub("\\..*$", "", up_septic_genes)
+
+up_sirs_entrez <- mapIds(org.Hs.eg.db,
+                         keys = up_sirs_genes,
+                         column = "ENTREZID",
+                         keytype = "ENSEMBL",
+                         )
+
+up_septic_entrez <- mapIds(org.Hs.eg.db,
+                           keys = up_septic_genes,
+                           column = "ENTREZID",
+                           keytype = "ENSEMBL",
+                           )
+
+up_sirs_entrez <- unique(na.omit(as.character(up_sirs_entrez)))
+up_septic_entrez <- unique(na.omit(as.character(up_septic_entrez)))
+```
+
+```{r}
+kk_sirs <- enrichKEGG(
+  gene = up_sirs_entrez,
+  universe = universo.entrez,
+  organism = "hsa",
+  keyType = "ncbi-geneid",
+  pvalueCutoff = 0.05,
+  pAdjustMethod = "BH"
+)
+
+kk_septic <- enrichKEGG(
+  gene = up_septic_entrez,
+  universe = universo.entrez,
+  organism = "hsa",
+  keyType = "ncbi-geneid",
+  pvalueCutoff = 0.05,
+  pAdjustMethod = "BH"
+)
+
+cat("Number of significantly enriched KEGG pathways among genes upregulated in SIRS:",
+    dim(kk_sirs)[1], "\n")
+
+cat("Number of significantly enriched KEGG pathways among genes upregulated in Septic Shock:",
+    dim(kk_septic)[1], "\n")
+```
+
+Directional KEGG enrichment analysis revealed no significantly enriched pathways among genes upregulated in SIRS, whereas 16 significantly enriched pathways were identified among genes upregulated in Septic Shock.
+
+```{r directional-kegg-plot, message=FALSE, warning=FALSE, fig.cap="**Figure 29.** KEGG pathways enriched among genes upregulated in Septic Shock.", fig.width=8, fig.height=5}
+p_directional <- dotplot(kk_septic, showCategory = 15) +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(size = 8),
+    plot.title = element_blank()
+  )
+
+p_directional
+```
+
+Interestingly, these results were highly similar to those obtained in the global KEGG enrichment analysis, indicating that the overall functional signal was mainly driven by genes upregulated in Septic Shock rather than by genes upregulated in SIRS. In particular, immune-inflammatory pathways and host-defense processes remained the dominant functional categories.
+
+Together, these findings suggest that the transcriptional differences between the two conditions are primarily associated with immune-inflammatory and host-defense processes activated in Septic Shock samples.
+
+In conclusion to this section, we also explored Gene Set Enrichment Analysis (GSEA) to obtain a pathway-level directional interpretation. However, no KEGG pathways remained significantly enriched after multiple testing correction (adjusted p-value \< 0.05). Therefore, GSEA results were not further interpreted.

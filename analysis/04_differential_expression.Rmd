@@ -1,0 +1,198 @@
+---
+title: "Comparative transcriptomic analysis of SIRS and Septic shock"
+author: "Bellandi Luisa, Tommaso Saccon"
+date: "2026-04-10"
+output: html_document
+---
+# Differential expression analysis
+
+In order to see which genes are differentially expressed between Septic Shock and SIRS, we used a generalized linear model using the Negative Binomial distribution implemented in the **edgeR package**. The dataset was first converted into a DGEList object, which contains information about the library size and count data.
+
+After this we performed both the between samples normalization (with the TMM method) and the within samples normalization (to remove the GC-content related bias).
+
+Finally, we designed a model matrix to analyze the differences between the groups based on the outcome variable. This matrix synthesizes the information of samples in a numerical matrix which can be used by the statistical model. SIRS was used as the reference group in the design matrix; therefore, positive logFC values correspond to genes upregulated in Septic Shock relative to SIRS.
+
+```{r, warning=FALSE}
+data_sel$outcome <- as.character(data_sel$outcome)
+
+colData(data_sel)$outcome <- factor(
+  colData(data_sel)$outcome,
+  levels = c("SIRS", "Septic shock")
+)
+
+design <- model.matrix(~ outcome, data = colData(data_sel))
+
+dge <- DGEList(assay(data_sel))
+dge <- calcNormFactors(dge, method="TMM")
+dge <- scaleOffset(dge, offset_gc)
+dge <- estimateDisp(dge, design)
+```
+
+We generated the mean-variance plot to asses heteroscedasticity of the RNA-seq count data.
+
+```{r mean-variance-plot, fig.cap="**Figure 16.** Mean-variance relationship in RNA-seq count data.", fig.width=8, fig.height=5}
+plotMeanVar(dge, show.raw.vars = TRUE, show.ave.raw.vars = F, NBline = TRUE, show.tagwise.vars = TRUE)
+```
+
+The visualization in Figure 16 confirms the presence of overdispersion, since the variance increases quadratically with respect to the mean. In black, the line representing the poisson model can be seen: this line fails to represent the data properly and, thus, this probability distribution cannot be used to investigate differential gene expression. In fact, the underfitting produced by Poisson would lead to a high false positive rate. On the other hand, in blue, the line representing the negative binomial fits the data correctly, following the trend of the mean-variance relationship produced by overdispersion.
+
+At this point, we fitted the generalized linear model based on the Negative Binomial to each gene.
+
+```{r, warning=FALSE}
+fit <- glmFit(dge, design)
+```
+
+Moreover, we performed a Likelihood Ratio Test to compare two hypotheses:
+
+-   $H_0 :$ the outcome variable (Septic Shock and SIRS) does not influence gene expression (null model);
+
+-   $H_1 :$ gene expression varies based on the group (complete model).
+
+Using the glmLRT function, the likelihood of the null and full models was compared for each gene: genes for which the full model provided a significantly better fit were considered differentially expressed between Septic Shock and SIRS samples.
+
+```{r}
+res <- glmLRT(fit, coef=2)
+```
+
+The results stored in the *res* object had to be processed in order to correct for multiple testing. In fact, we used the topTags function to correct the p-values with the Benjamini-Hochberg procedure and to compute the False Discovery Rate (FDR), in order to reduce the number of false positives.
+
+The FDR was then used to extract from the topTags table only differentially expressed genes.
+
+```{r}
+tab <- topTags(res, n=Inf)
+tab <- tab$table
+differentially_expressed <- tab[tab$FDR <0.15,] 
+cat("By using an FDR threshold of 0.15, we extracted a list of",
+    nrow(differentially_expressed),
+    "differentially expressed genes.")
+```
+
+By using an FDR threshold, we extracted a list of 61 genes, which were down-/up-regulated in Septic Shock or SIRS groups. More specifically, we chose a threshold value of 0.15, as the standard 0.05 threshold only led to 10 differentially expressed genes, significantly reducing the power of the following analysis steps.
+
+With the log-Fold Change value we could see which genes were up-regulated and which genes were down-regulated. Because in our design matrix the reference group was SIRS, if the log Fold Change of a gene is positive, it means that it is up-regulated in the Septic Shock group with respect to SIRS.
+
+In order to assess the overall distribution of differentially expressed genes we used the MD plot that shows the relationship between the log-Fold Change (logFC) and the average expression magnitude (average log CPM).
+
+```{r deg-md-plot, fig.cap="**Figure 17.** MD plot of differentially expressed genes.", fig.width=8, fig.height=5}
+de_status <- decideTests(res, p.value = 0.15, adjust.method = "BH")
+plotMD(res, status = de_status, main = '')
+```
+
+In the plot, the majority of genes appears to be equally expressed in the two conditions: a distribution around logFC = 0 shows that the normalization worked properly. Moreover, significant differentially expressed genes are observed across different expression levels, with a predominance of positive logFC values corresponding to genes upregulated in Septic Shock samples.
+
+Similarly, we visualized the results with a Volcano Plot, a scatter plot where we plotted significance of differential expression (p-value) versus magnitute of change (logFC).
+
+```{r volcano-plot, fig.cap="**Figure 18.** Volcano plot.", fig.width=8, fig.height=5}
+names <- row.names(differentially_expressed)
+
+tab$sign <- NA
+tab$sign[tab$logFC < 0] <- "Down" #Down in septic
+tab$sign[tab$logFC > 0] <- "Up"
+tab$sign[tab$FDR >= 0.15] <- "NoSig"
+tab$gene <- rownames(tab)
+
+ggplot(tab, aes(x = logFC, y = -log10(PValue), color = sign)) + geom_point() + theme_classic() +
+  scale_color_manual(values = c("Down" = "blue", "Up" = "red", "NoSig" = "black")) +
+  geom_text_repel(data = tab[1:20, ], aes(label = gene), size = 2.5, max.overlaps = 20) 
+```
+
+Up-regulated, that are the ones that exhibit a positive logFC, are shown in red: they are significantly more expressed in the Septic Shock group compared to the reference SIRS. Notable transcripts include ENSG00000163958.13 and ENSG00000167680.15, which show high statistical significance and strong fold induction.
+
+In blue we see transcripts which show a negative logFC, indicating higher expression in SIRS than in Septic Shock.Examples include ENSG00000159251.6 and ENSG0000007350.16.
+
+In order to evaluate the performance of the model, the distribution of raw p-values was analyzed. Ideally, a point mass should be observed at 0, followed by a uniform distribution.
+
+```{r pvalue-histogram, fig.cap="**Figure 19.** P-values distribution.", fig.width=8, fig.height=5}
+hist(tab$PValue, main="", xlab = "Raw p-value", col = "#d9e8df",
+  border = "#1b4d3e")
+```
+
+However, the plot shows that the frequency of raw p-values is not properly uniform. Thus, the model was not optimal.
+
+In order to obtain a better fit of the data by the model, we used the **Remove Unwanted Variance (RUV) method**. With this approach, we could remove unknown batch effects by estimating the confounding factors directly from the data.
+
+To do this, we extracted from the data genes which were used as negative controls. In our case, we used the 1000 “less differentially expressed” genes, which were the genes with the highest p-values in the list of differentially expressed genes.
+
+```{r}
+design_initial <- model.matrix(~ outcome, data = colData(data_sel))
+fit_initial <- glmFit(dge, design_initial)
+resids <- residuals(fit_initial, type = "deviance")
+
+res_initial <- glmLRT(fit_initial, coef = 2)
+res_tab <- as.data.frame(res_initial$table)
+non_degs <- rownames(res_tab[order(res_tab$PValue, decreasing = TRUE), ])[1:1000]
+```
+
+At this point, we could then use the residuals of the original model to obtain the W factor (a matrix of one column containing the unwanted variance factor for each sample in the data).
+
+After creating the unwanted variance array, we added it to the data set and used it in the design matrix. Then, we repeated the same steps performed before.
+
+```{r}
+set_ruv <- RUVr(dge$counts, non_degs, k = 1, resids)
+
+data_sel$W1 <- set_ruv$W[,1]
+
+design_final <- model.matrix(~ W1 + outcome, data = colData(data_sel))
+
+dge_final <- estimateDisp(dge, design_final)
+fit_final <- glmFit(dge_final, design_final)
+
+res_final <- glmLRT(fit_final, coef = 3)
+```
+
+As we did before, we used topTags and then extracted differentially expressed genes using an FDR threshold.
+
+```{r}
+tab <- topTags(res_final, n=Inf)
+tab <- tab$table
+differentially_expressed <- tab[tab$FDR <0.05,] 
+cat("Number of differentially expressed genes:",
+    nrow(differentially_expressed))
+```
+
+In this case the threshold used to extract differentially expressed genes was 0.05, which led to the extraction of 538 genes. Compared to the previous model, the power increased significantly: we found more genes with a stricter FDR threshold.
+
+Again, to visualize the results, we used the MD plot and the Volcano plot.
+
+```{r final-md-plot, fig.cap="**Figure 20.** MD plot after RUV correction.", fig.width=8, fig.height=5}
+plotMD(res_final, main = '')
+```
+
+```{r final-volcano-plot, fig.cap="**Figure 21.** Volcano plot after RUV correction.", fig.width=8, fig.height=5}
+names <- row.names(differentially_expressed)
+
+tab$sign <- NA
+tab$sign[tab$logFC < 0] <- "Down"
+tab$sign[tab$logFC > 0] <- "Up"
+tab$sign[tab$FDR >= 0.05] <- "NoSig"
+tab$gene <- rownames(tab)
+
+ggplot(tab, aes(x = logFC, y = -log10(PValue), color = sign)) + geom_point() + theme_classic() +
+  scale_color_manual(values = c("Down" = "blue", "Up" = "red", "NoSig" = "black")) +
+  geom_text_repel(data = tab[1:20, ], aes(label = gene), size = 2.5, max.overlaps = 20) 
+```
+
+In both cases, it can easily be seen that the number of differentially expressed genes found by the model is higher. These results suggest that unwanted sources of variability were masking part of the biological signal in the original analysis and that RUV correction improved the ability of the model to detect transcriptional differences between Septic Shock and SIRS samples.
+
+```{r}
+up_septic <- tab[tab$FDR < 0.05 & tab$logFC > 0, ]
+up_sirs <- tab[tab$FDR < 0.05 & tab$logFC < 0, ]
+total_degs <- nrow(differentially_expressed)
+
+cat("Genes upregulated in Septic Shock:",
+    nrow(up_septic), "(", round(nrow(up_septic) / total_degs * 100, 1), "% )\n")
+
+cat("Genes upregulated in SIRS:",
+    nrow(up_sirs), "(", round(nrow(up_sirs) / total_degs * 100, 1), "% )\n")
+```
+
+Most differentially expressed genes showed positive logFC values, indicating higher expression in Septic Shock compared to SIRS, indicating that the transcriptional differences between the two conditions are mainly driven by genes upregulated in Septic Shock samples.
+
+Finally, to assess the quality of the fit, the histogram of raw p-value frequencies was used.
+
+```{r final-pvalue-histogram, fig.cap="**Figure 22.** P-value distribution after RUV correction.", fig.width=8, fig.height=5}
+hist(tab$PValue, main="", xlab = "Raw p-value",col = "#d9e8df",
+  border = "#1b4d3e")
+```
+
+With respect to the original model, the distribution of raw p-values confirmed that the model was working properly. In fact, there is a point mass at 0 and, for higher p-vlaues, we obtained a uniform distribution.

@@ -1,0 +1,146 @@
+---
+title: "Comparative transcriptomic analysis of SIRS and Septic shock"
+author: "Bellandi Luisa, Tommaso Saccon"
+date: "2026-04-10"
+output: html_document
+---
+
+# Exploratory analysis
+
+## Histogram and boxplot of pseudocounts
+
+We first examined the distribution of raw counts to assess the overall structure of the dataset. For this purpose, counts were transformed using log1p to reduce skewness and improve interpretability.
+
+```{r raw-count-histogram, fig.cap="**Figure 1.** Distribution of log1p-transformed raw counts.", fig.width=8, fig.height=5}
+raw_count <- assay(data_sel)
+log1p_count=log1p(raw_count)
+hist(log1p_count, main = '', xlab = expression(log(1 + raw_count)), ylab = "Frequency",
+  col = "#d9e8df", border = "#1b4d3e")
+```
+
+The histogram shows a strongly right-skewed distribution reflecting the presence of many lowly expressed genes alongside a few highly abundant transcripts.
+
+Then, we computed boxplots of log-transformed counts, with samples colored according to their clinical outcome (SIRS vs Septic Shock), in order evaluate whether global expression patterns differ between groups.
+
+```{r expression-boxplots, fig.cap="**Figure 2.** Distribution of log1p-transformed expression values across samples.", fig.width=8, fig.height=5}
+df= as.data.frame(log1p_count)
+df$gene=rownames(df)
+df_long=pivot_longer(df, cols= -gene, names_to="sample", values_to="Expression")
+
+outcome=data_sel$outcome
+names(outcome)=colnames(log1p_count)
+
+df_long$outcome= outcome[df_long$sample]
+
+ggplot(df_long, aes(x=sample, y=Expression, fill=outcome)) +geom_boxplot()+scale_fill_manual(values=c("SIRS"="hotpink", "Septic shock"="aquamarine"))+
+  labs(
+    x = "Sample",
+    y = "log1p expression")
+```
+
+The boxplots show comparable expression distributions across samples, suggesting the absence of major technical variability. However, differences in median and spread are still present, highlighting the need for normalization before downstream analyses.
+
+## MA and MD plots
+
+Then, we computed the MA plot which allowed us to assess the relationship between the average expression level (A) and the log-fold change (M) between samples, highlighting systematic biases that may not be immediately visible in a scatterplot.
+
+```{r raw-count-ma-plot, fig.cap="**Figure 3.** MA plot of log1p-transformed raw counts.", fig.width=8, fig.height=5}
+limma::plotMA(log1p(raw_count), main="",xlab = "A", ylab = "M")
+```
+
+In our case, the plot shows increased variability at low expression levels and a visible spread of points, particularly on the left side. This behavior is typical of RNA-seq data due to the discrete nature of low counts, but it may also reflect technical biases. The normalization we will do in the next section aims to remove these systematic effects, centering the distribution around zero, stabilizing variability across expression levels and making samples more comparable.
+
+We also computed an MD plot comparing two selected raw count samples (9 and 10):
+
+```{r raw-count-md-plot, fig.cap="**Figure 4.** MD plot comparing two raw count samples.", fig.width=8, fig.height=5}
+MDPlot(raw_count, c(9,10), main = '')
+```
+
+This plot shows a clear intensity-dependent trend, as the smooth curve deviates from zero across a wide range of expression values. In addition, variability is higher at low expression levels and becomes more stable as the mean expression increases, which is typical of RNA-seq data. Again, the observed pattern suggests that normalization is required to remove the dependence between mean expression and differences and to ensure comparability across samples.
+
+## RLE plot
+
+Then, we computed the RLE plot as a baseline quality-control visualization before normalization:
+
+```{r raw-count-rle-plot, fig.cap="**Figure 5.** RLE plot of raw counts across SIRS and Septic shock samples.", fig.width=8, fig.height=5}
+col=ifelse(data_sel$outcome=="SIRS", "hotpink", "aquamarine")
+plotRLE(raw_count, outline = FALSE, las = 2,
+        ylab = "RLE", main = "",
+        col = col, xaxt = "n")
+legend("topright",
+       legend = c("SIRS", "Septic shock"),
+       fill = c("hotpink", "aquamarine"),
+       bty = "n")
+```
+
+The RLE plot is consistent with what we already observed in the previous plot, as it shows the presence of residual variability across samples with several boxplots deviate from zero and show differences in spread. This further supports the need for normalization before downstream analyses. As expected, no clear separation between SIRS and Septic shock groups is evident at this stage of the analysis.
+
+## Principal component analysis
+
+We perfomed the Principal Component Analysis to explore the main sources of variability in our dataset and to evaluate wheter samples tend to cluster according to biological condition:
+
+```{r pca-screeplot, fig.cap="**Figure 6.** PCA scree plot.", fig.width=8, fig.height=5}
+pca <- prcomp(t(log1p(raw_count)))
+screeplot(pca, type = "lines", col="#1b4d3e")
+```
+
+The scree plot shows that most of the variability in the data is captured by PC1, while additional components contribute progressively less.
+
+```{r pca-plot, fig.cap="**Figure 7.** PCA plot.", fig.width=8, fig.height=5}
+df = as.data.frame(pca$x[, c(1,2)])
+colnames(df) = c("PC1", "PC2")
+
+df$outcome = colData(data_sel)$outcome
+
+ggplot(df, aes(x = PC1, y = PC2, color = outcome)) +
+  geom_point(size = 2) +
+  scale_color_manual(values = c(
+    "SIRS" = "hotpink",
+    "Septic shock" = "aquamarine"
+  )) +
+  theme_minimal()
+```
+
+The PCA plot does not show a clear separation between SIRS and septic shock samples: points from the two groups are largely overlapping, suggesting that the main sources of variability captured by the first two principal components are not associated with the outcome.
+
+## GC content bias analysis
+
+To investigate GC content bias, gene-level GC information was retrieved and matched to the dataset using Ensembl gene identifiers. Genes lacking GC content annotation were removed, and the dataset was filtered to retain only those with available GC information.
+
+```{r}
+ensid <- as.character(rowRanges(data_sel)$gene_id)
+ensid <- substr(ensid, 1, 15)
+
+gc <- getGeneLengthAndGCContent(id = ensid, org = "hg38", mode = "org.db")
+
+# remove genes with no information on GC content 
+gc <- gc[!is.na(gc[, 2]), ]
+rowData(data_sel)$ensid <- ensid
+data_sel <- data_sel[rowData(data_sel)$ensid  %in% rownames(gc), ]
+raw_count <- assay(data_sel)
+row.names(raw_count) <- row.names(gc)
+cat("Duplicated gene identifiers:", any(duplicated(row.names(raw_count)))) 
+```
+
+No duplicated gene identifiers were detected after matching gene expression data with GC-content information.
+
+We computed the GC-content bias:
+
+```{r gc-bias-plot, fig.cap="**Figure 8.** GC-content bias plot.", fig.width=8, fig.height=5}
+set <- newSeqExpressionSet(raw_count, phenoData = AnnotatedDataFrame(data.frame(conditions = factor(1:ncol(raw_count)),  row.names = colnames(raw_count))), featureData = AnnotatedDataFrame(data.frame(gc = gc[, 2], l = gc[, 1])))
+
+s <- EDASeq::biasPlot(set, "gc", ylim = c(0, 10), log = TRUE, legend = FALSE)
+```
+
+The relationship between GC content and gene expression shows a clear non-linear trend, with expression increasing up to intermediate GC values and decreasing thereafter. Some variability between sample-specific curves is observed, suggesting that the GC effect is not perfectly consistent across samples and may introduce bias that may affect downstream analyses. For this reason, GC normalization will be applied in the next step to correct this effect before performing between-sample normalization.
+
+To further assess GC-content bias, we plotted the distribution of log-expression differences between two selected samples across GC-content bins.
+
+```{r gc-bias-boxplot, fig.cap="**Figure 9.** GC-content bias boxplot.", fig.width=8, fig.height=5}
+lrt <- log1p(raw_count[, 9]) - log1p(raw_count[, 10]) # same samples used in the MD plot
+
+biasBoxplot(lrt, gc[, 2], outline = FALSE, xlab = "GC-content", ylab = "Gene expression", las = 2, cex.axis = 0.5,  xaxt = "n", col = "#d9e8df", border = "#1b4d3e"
+)
+```
+
+The boxplot shows that the log-expression differences between the two samples are not centered around zero across GC-content bins, confirming the presence of GC-dependent bias.

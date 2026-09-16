@@ -1,0 +1,48 @@
+---
+title: "Comparative transcriptomic analysis of SIRS and Septic shock"
+author: "Bellandi Luisa, Tommaso Saccon"
+date: "2026-04-10"
+output: html_document
+---
+
+# Cluster analysis
+
+In order to identify the presence of patterns in the data, we performed a cluster analysis. This way, if the expression pattern was different between the two groups, we expected to observe it.
+
+First, we produced a heatmap.
+
+```{r deg-heatmap, fig.cap="**Figure 23.** Heatmap of differentially expressed genes.", fig.width=8, fig.height=6}
+raw_count <- dge_final$counts
+lbs <- calcNormFactors(raw_count, method = "TMM")
+tmm <- cpm(raw_count, lib.size = lbs * colSums(raw_count))
+
+names <- rownames(differentially_expressed)
+data_degs <- tmm[names, ]
+
+Col <- data.frame(Outcome = data_sel$outcome)
+rownames(Col) <- colnames(data_sel)
+
+ann_colors = list(Outcome = c("Septic shock" = "aquamarine", "SIRS" = "hotpink"))
+
+heatmap_degs <- pheatmap(log1p(data_degs), show_colnames = FALSE, show_rownames = FALSE, scale = 'row',
+                         drop_levels = TRUE, annotation_col = Col, annotation_colors = ann_colors)
+```
+
+This heat map represents the hierarchical clustering of differentially expressed genes (DEGs) between patients with Septic shock and SIRS. In the columns there are the samples, in the rows the genes. Red/orange boxes indicate genes expressed above the mean for that specific transcript across all samples, whereas blue indicates genes expressed below the mean.
+
+In the heat map two predominant groups can be distinguished by means of gene expression pattern, which correspond to the Septic Shock and SIRS groups. The separation is not perfect, but this could be the result of Sepsis being an heterogeneous syndrome where the diagnosis of patients is not always totally clear.
+
+In order to assess the robustness of the clustering results, the silhouette plot was computed. In fact, with this kind of plot we could get a quantitative measure of how well each individual patient fits within their assigned cluster.
+
+```{r silhouette-plot, message=FALSE, fig.cap="**Figure 24.**Silhouette analysis of sample clustering.", fig.width=8, fig.height=5}
+cut <- cutree(heatmap_degs$tree_col, k = 2)
+
+distance_matrix <- dist(t(log1p(data_degs)))
+plot(silhouette(cut, distance_matrix), col=c("aquamarine", "hotpink"), border=NA, main='')
+```
+
+The SIRS cluster (pink) exhibits the highest structural stability between the two (with a average silhouette width of 0.35). The positive silhouette widths, reaching approximately 0.5, indicate that these patients possess a well-defined transcriptomic signature. There are no negative values in this cluster, suggesting that the SIRS molecular profile is relatively distinct and homogeneous within this dataset.
+
+The Septic Shock group has a lower average width (0.18), which indicates significant internal variability. While the majority of patients show a correct assignment, the plot reveals a subset of samples with negative silhouette values. This means that these individuals are clinically diagnosed with Septic shock but are transcriptionally more similar to the SIRS group.
+
+This was observed by the authors of the reference article as well. In fact, they observed that many Septic Shock patients have a 'muted' immune response. This happens especially when patients are either near or in the state of Sepsis collapse.
