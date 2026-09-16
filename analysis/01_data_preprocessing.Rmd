@@ -10,7 +10,7 @@ output: html_document
 First, we imported raw data:
 
 ```{r}
-data <- readRDS("data/SRP050000.rds")
+data <- readRDS("../data/SRP050000.rds")
 cat("The dataset contains",  nrow(data), "genes and",  ncol(data), "samples.")
 ```
 
